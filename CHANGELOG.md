@@ -12,3 +12,4 @@ First public release, as Claude Switchboard.
 - Optional claude-swap integration: account usage, switching, notifications at 85% of 5 hours or 80% of a week.
 - Full-text search across chats; rendered replies in the detail panel; keyboard navigation (j, k, Enter, r, a, m, Esc, Cmd+F, Cmd+R).
 - Shared compute: `tools/offload` (run commands and Claude Code chats on a second machine with the project synced both ways, detached jobs, port forwards, moves), `claude-sync` (setup there, transcripts back), `tmux.conf`, a 38-check end-to-end test, and docs/SHARED-COMPUTE.md.
+- Linux setup: docs/LINUX-SETUP.md (a headless compute box from a blank disk: btrfs subvolumes and snapshots, packages, zswap, key-only ssh), `tools/linux-setup/configure-arch.sh` and `post-install.sh` (idempotent, with a read-only `--check`).
