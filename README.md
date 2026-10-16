@@ -6,7 +6,7 @@ It is for people who keep many Claude Code chats open at once, mostly in VS Code
 
 Two parts:
 - **The app** (`src/`): a macOS window over all your chats and both machines.
-- **Shared compute** (`tools/offload/`, [docs/SHARED-COMPUTE.md](docs/SHARED-COMPUTE.md)): how to set up a headless Linux box for Claude Code, a command-line tool that runs commands and chats there with your project synced both ways, a config and transcript sync, and an end-to-end test suite for your setup.
+- **Shared compute** (`tools/`, [docs/SHARED-COMPUTE.md](docs/SHARED-COMPUTE.md), [docs/LINUX-SETUP.md](docs/LINUX-SETUP.md)): how to install and set up a headless Linux box for Claude Code, with install scripts, a command-line tool that runs commands and chats there with your project synced both ways, a config and transcript sync, and an end-to-end test suite for your setup.
 
 ## What it does
 
@@ -60,7 +60,7 @@ Screenshots are not included yet; they would show the author's own chats. Contri
 ## Install
 
 ```sh
-git clone <this repository>
+git clone https://github.com/akv2011/claude-switchboard.git
 cd claude-switchboard
 bun install
 npm test                 # node --test, 162 tests, no network
@@ -108,6 +108,7 @@ Save it as `~/.config/claude-switchboard/config.json`.
 ## Documentation
 
 - [docs/SHARED-COMPUTE.md](docs/SHARED-COMPUTE.md): setting up a second machine and sharing the work.
+- [docs/LINUX-SETUP.md](docs/LINUX-SETUP.md): installing that machine from a blank disk, with `tools/linux-setup/`.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): modules, data flow, the RPC surface, the bridge protocol.
 - [docs/CONFIG.md](docs/CONFIG.md): every setting.
 - [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md).
