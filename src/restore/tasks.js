@@ -1,9 +1,9 @@
 /**
- * Restore terminals without a VSCode extension.
+ * Restore terminals without a VS Code extension.
  *
- * VSCode natively runs tasks when a folder opens, via
+ * VS Code natively runs tasks when a folder opens, via
  * runOptions.runOn = "folderOpen", and gives each task its own terminal panel.
- * So restoring is just writing a tasks.json: open the folder and VSCode itself
+ * So restoring is just writing a tasks.json: open the folder and VS Code itself
  * spawns the terminals and resumes every chat. No extension, no AppleScript, no
  * driving the UI from outside.
  *
@@ -11,15 +11,15 @@
  * was verified by experiment, not assumption: a probe task in an untrusted
  * folder never fired, the same probe in a trusted folder fired in 4 seconds.
  *
- *   1. "task.allowAutomaticTasks" must be "on" in USER settings. VSCode's own
+ *   1. "task.allowAutomaticTasks" must be "on" in USER settings. VS Code's own
  *      schema marks it scope 1 (APPLICATION), like update.mode, so a workspace
  *      .vscode/settings.json copy is read by nobody. This module used to write
  *      exactly that and report success. See restore/vscode-settings.js.
- *   2. The folder must be trusted. VSCode's RunAutomaticTasks returns before it
+ *   2. The folder must be trusted. VS Code's RunAutomaticTasks returns before it
  *      even inspects the setting when isWorkspaceTrusted() is false, so a fresh
  *      folder does nothing at all until you answer the trust prompt.
  *
- * A third, and the awkward one: VSCode does not reliably run several tasks that
+ * A third, and the awkward one: VS Code does not reliably run several tasks that
  * start together. Since 1.70 multiple runOn folderOpen tasks do not all fire
  * (microsoft/vscode#160013), and a dependsOn parent did not help either.
  * Measured on four tasks, only presentation.group ran all of them:
@@ -29,7 +29,7 @@
  *   dependsOn + dedicated       1 of 4
  *   dependsOn + panel "new"     0 of 4
  *
- * So tasks share a group. VSCode presents grouped tasks as split panes rather
+ * So tasks share a group. VS Code presents grouped tasks as split panes rather
  * than tabs, which is a real cost, but silently restoring one chat out of four
  * is a worse one. The panes can be rearranged by hand afterwards.
  *
@@ -68,7 +68,7 @@ export function resumeCommand(sessionId, claude = 'claude') {
 
 /**
  * `env -u ...` for every marker a parent Claude session leaves behind. A
- * VSCode window opened from inside a chat passes them to all its terminals,
+ * VS Code window opened from inside a chat passes them to all its terminals,
  * and a chat started there saves no transcript (Claude Code says "Transcript
  * saving is off, inherited CLAUDE_CODE_CHILD_SESSION marker").
  */
@@ -81,7 +81,7 @@ export function buildTasks(sessions, options = {}) {
   const claude = options.claudePath ?? 'claude';
   const root = options.workspaceRoot ?? null;
   // presentation.group is documented as "use split terminals", and it is the
-  // only configuration in which VSCode actually runs every task. Measured on
+  // only configuration in which VS Code actually runs every task. Measured on
   // four tasks: with a shared group 4 of 4 ran; without it 1 of 4; via
   // dependsOn with a dedicated panel 1 of 4; with panel "new" 0 of 4.
   // Losing chats is worse than the layout, so grouping is the default. Opting

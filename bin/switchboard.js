@@ -129,7 +129,7 @@ async function cmdRestore(args) {
   }
 
   if (!args.includes('--yes')) {
-    console.log(`\n${DIM}dry run. add --yes to write .vscode/tasks.json and open VSCode.${RESET}`);
+    console.log(`\n${DIM}dry run. add --yes to write .vscode/tasks.json and open VS Code.${RESET}`);
     return;
   }
   for (const [cwd, group] of byCwd) {
@@ -138,14 +138,14 @@ async function cmdRestore(args) {
   }
   const auto = readAutoTaskSetting();
   if (auto.enabled) {
-    console.log(`${DIM}VSCode will spawn the terminals when the folder opens.${RESET}`);
+    console.log(`${DIM}VS Code will spawn the terminals when the folder opens.${RESET}`);
   } else {
-    console.log(`${YELLOW}tasks written, but VSCode will NOT run them.${RESET}`);
+    console.log(`${YELLOW}tasks written, but VS Code will NOT run them.${RESET}`);
     console.log(`${DIM}task.allowAutomaticTasks is application-scoped, so it only counts in user settings. run: switchboard autotasks${RESET}`);
   }
-  console.log(`${DIM}the folder must also be trusted, or VSCode blocks automatic tasks silently.${RESET}`);
+  console.log(`${DIM}the folder must also be trusted, or VS Code blocks automatic tasks silently.${RESET}`);
   if (readPersistentSessions().effective) {
-    console.log(`${YELLOW}heads up: VSCode terminal revival is on, so you will also get empty shells beside these. run: switchboard persistence off${RESET}`);
+    console.log(`${YELLOW}heads up: VS Code terminal revival is on, so you will also get empty shells beside these. run: switchboard persistence off${RESET}`);
   }
 }
 
@@ -200,7 +200,7 @@ function cmdLayout(args) {
     console.log(`terminal location: ${BOLD}${current.effective}${RESET}`);
     console.log(`${DIM}switchboard layout view    restored terminals in the bottom panel${RESET}`);
     console.log(`${DIM}switchboard layout editor  restored terminals as editor tabs${RESET}`);
-    console.log(`${DIM}VSCode has no per-task option for this (microsoft/vscode#212070), it is one global setting.${RESET}`);
+    console.log(`${DIM}VS Code has no per-task option for this (microsoft/vscode#212070), it is one global setting.${RESET}`);
     return;
   }
   const result = setTerminalLocation(wanted);
@@ -213,10 +213,10 @@ function cmdPersistence(args) {
   const wanted = args.find((a) => !a.startsWith('-'));
   const current = readPersistentSessions();
   if (!wanted) {
-    console.log(`VSCode terminal revival: ${BOLD}${current.effective ? 'on' : 'off'}${RESET}${current.present ? '' : `${DIM} (unset, VSCode defaults to on)${RESET}`}`);
+    console.log(`VS Code terminal revival: ${BOLD}${current.effective ? 'on' : 'off'}${RESET}${current.present ? '' : `${DIM} (unset, VS Code defaults to on)${RESET}`}`);
     if (current.effective) {
       console.log(`${YELLOW}while this is on you get duplicates after a restore.${RESET}`);
-      console.log(`${DIM}VSCode revives your old terminals as empty shells (the chat that was running in them is gone) and restore spawns fresh ones alongside.${RESET}`);
+      console.log(`${DIM}VS Code revives your old terminals as empty shells (the chat that was running in them is gone) and restore spawns fresh ones alongside.${RESET}`);
       console.log(`${DIM}switchboard persistence off   leave restore as the only thing reopening terminals${RESET}`);
     }
     return;
@@ -225,8 +225,8 @@ function cmdPersistence(args) {
   if (!['on', 'off'].includes(wanted)) throw new Error('usage: switchboard persistence <on|off>');
   const result = setPersistentSessions(enabled);
   if (!result.changed) return console.log(`${YELLOW}no change: ${result.reason}${RESET}`);
-  console.log(`${GREEN}VSCode terminal revival ${enabled ? 'on' : 'off'} (${result.reason})${RESET}`);
-  console.log(`${DIM}${enabled ? 'VSCode will reopen its own terminals again.' : 'restore is now the only thing that reopens terminals.'}${RESET}`);
+  console.log(`${GREEN}VS Code terminal revival ${enabled ? 'on' : 'off'} (${result.reason})${RESET}`);
+  console.log(`${DIM}${enabled ? 'VS Code will reopen its own terminals again.' : 'restore is now the only thing that reopens terminals.'}${RESET}`);
 }
 
 function cmdClear(args) {
@@ -243,9 +243,9 @@ ${BOLD}switchboard${RESET} - claude switchboard
   ${BOLD}switchboard restore${RESET} [--yes]      bring back what was open before shutdown
   ${BOLD}switchboard delete${RESET} <id|name> [--yes]   delete a chat and everything keyed to it
   ${BOLD}switchboard clear${RESET} [folder]       remove generated tasks from a folder
-  ${BOLD}switchboard autotasks${RESET}            let VSCode auto-run restored terminals
+  ${BOLD}switchboard autotasks${RESET}            let VS Code auto-run restored terminals
   ${BOLD}switchboard layout${RESET} [view|editor]  where restored terminals open
-  ${BOLD}switchboard persistence${RESET} [on|off]  VSCode's own terminal revival (off avoids duplicates)
+  ${BOLD}switchboard persistence${RESET} [on|off]  VS Code's own terminal revival (off avoids duplicates)
   ${BOLD}switchboard daemon${RESET} <install|uninstall|status|poll>
 
 ${DIM}delete and restore are dry runs until you pass --yes.${RESET}

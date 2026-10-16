@@ -50,7 +50,7 @@ export function readRegistry() {
  *
  *   kind "interactive", entrypoint "cli"           a terminal a human used
  *   kind "bg"                                      pre-warmed background worker
- *   kind "interactive", entrypoint "claude-vscode" the VSCode extension panel
+ *   kind "interactive", entrypoint "claude-vscode" the VS Code extension panel
  *
  * The last two have no terminal to restore into, and `claude --resume` on them
  * is meaningless, so counting either inflates the running total and would

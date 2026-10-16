@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.0.1
 
+- A window left hidden for a while no longer says it could not load the chats when shown again. WebKit freezes a hidden window's page; a request in flight then timed out on waking although the app had answered. Reads are now asked once more; actions are not.
 - Screenshots in the README, taken from an invented demo overview (`scripts/demo-overview.mjs`).
 - A remote chat waiting on you no longer cuts off "Needs you" next to a longer machine name.
 - The New chat form has side padding, and its note is set in the body font.
+- "VS Code" is spelled as Microsoft spells it.
 
 ## 1.0.0
 

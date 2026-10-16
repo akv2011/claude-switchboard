@@ -142,7 +142,7 @@ test('a chat run in the home directory does not swallow every project', async ()
 
 
 
-test('the VSCode extension panel is not a terminal chat', async () => {
+test('the VS Code extension panel is not a terminal chat', async () => {
   const { isTerminalSession } = await import('../src/core/registry.js');
   // Same kind as a real terminal chat, different entrypoint. Restoring it would
   // run claude --resume in a terminal for a chat that lives in the sidebar.

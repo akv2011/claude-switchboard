@@ -1,8 +1,8 @@
 /**
- * App side of vscode-bridge/: ask VSCode to type a command into a terminal.
+ * App side of vscode-bridge/: ask VS Code to type a command into a terminal.
  *
  * Writes a request, waits for a window to report it done, and opens the
- * chat's folder in VSCode when no window has claimed it after a few seconds
+ * chat's folder in VS Code when no window has claimed it after a few seconds
  * (the bridge in the new window then takes it). The window that acted is
  * brought to the front with `code <folder>`.
  */
@@ -52,10 +52,10 @@ export function parentPid(pid) {
 }
 
 /**
- * Type into the VSCode terminal a running chat sits in. Only that terminal:
+ * Type into the VS Code terminal a running chat sits in. Only that terminal:
  * no window is opened and no new terminal is made. `newline: false` sends a
  * key alone (Esc, Shift+Tab). Fails when no window holds the terminal, which
- * is the case for a chat started outside VSCode.
+ * is the case for a chat started outside VS Code.
  */
 export async function typeIntoTerminal({ shellPid, text, newline = true }, { root = ROOT, giveUpMs = 6000 } = {}) {
   if (!shellPid) return { ok: false, error: 'no terminal known for this chat' };
@@ -75,7 +75,7 @@ export async function typeIntoTerminal({ shellPid, text, newline = true }, { roo
     await sleep(150);
   }
   fs.rmSync(path.join(keys, id), { force: true });
-  return { ok: false, error: 'No open VSCode window has this chat\'s terminal. Only chats in VSCode terminals can be steered from here; if it is one, run "Developer: Restart Extension Host" once to load the updated bridge.' };
+  return { ok: false, error: 'No open VS Code window has this chat\'s terminal. Only chats in VS Code terminals can be steered from here; if it is one, run "Developer: Restart Extension Host" once to load the updated bridge.' };
 }
 
 export async function runInVscodeTerminal(
@@ -108,5 +108,5 @@ export async function runInVscodeTerminal(
     await sleep(250);
   }
   fs.rmSync(path.join(requests, id), { force: true });
-  return { ok: false, error: `VSCode did not take it. Is the bridge installed? Run this in a terminal: ${text}` };
+  return { ok: false, error: `VS Code did not take it. Is the bridge installed? Run this in a terminal: ${text}` };
 }

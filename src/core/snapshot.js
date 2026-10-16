@@ -266,7 +266,7 @@ export function restorableSessions(snapshot = readSnapshot(), retainMs = RETAIN_
 }
 
 /**
- * Sessions grouped by cwd, which is the unit a VSCode window restores.
+ * Sessions grouped by cwd, which is the unit a VS Code window restores.
  * @returns {Array<{cwd:string, sessions:Array<object>}>}
  */
 export function groupByCwd(sessions) {
@@ -280,10 +280,10 @@ export function groupByCwd(sessions) {
 }
 
 /**
- * Group sessions by the folder you would actually open in VSCode.
+ * Group sessions by the folder you would actually open in VS Code.
  *
  * Grouping by exact cwd looks right in a list but restores badly: a chat started
- * in Projects/reader would open its own VSCode window, separate from the
+ * in Projects/reader would open its own VS Code window, separate from the
  * Projects window you work in. Nested cwds are therefore folded into the
  * shallowest cwd that also has sessions, and each task carries its own cwd so
  * the terminals still start in the right subfolder.

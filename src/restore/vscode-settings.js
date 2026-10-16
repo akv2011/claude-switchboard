@@ -1,9 +1,9 @@
 /**
- * Enabling VSCode's automatic tasks, in the only place VSCode actually reads it.
+ * Enabling VS Code's automatic tasks, in the only place VS Code actually reads it.
  *
  * This module exists because of a bug: restore used to write
  * `"task.allowAutomaticTasks": "on"` into the project's .vscode/settings.json,
- * which does nothing whatsoever. VSCode's own bundled schema says:
+ * which does nothing whatsoever. VS Code's own bundled schema says:
  *
  *   "task.allowAutomaticTasks": { enum:["on","off"], default:"off",
  *                                 scope:1, restricted:true }
@@ -13,7 +13,7 @@
  * settings for them are ignored silently. So the tasks were written correctly
  * and then never ran, and restore reported success anyway.
  *
- * `restricted: true` matters too: the folder must be trusted, or VSCode's
+ * `restricted: true` matters too: the folder must be trusted, or VS Code's
  * RunAutomaticTasks bails before it looks at the setting at all.
  *
  * User settings.json is JSONC (comments, trailing commas) and is hand-edited, so
@@ -28,11 +28,11 @@ import os from 'node:os';
 const KEY = 'task.allowAutomaticTasks';
 
 /**
- * Where task terminals appear. VSCode has no per-task option for this
+ * Where task terminals appear. VS Code has no per-task option for this
  * (microsoft/vscode#212070 is still open), so it is one global setting:
  *   "view"   the bottom terminal panel
  *   "editor" the editor area, as tabs
- * With it unset, VSCode restores whatever layout each terminal last had, which
+ * With it unset, VS Code restores whatever layout each terminal last had, which
  * is how a single restore ends up split across both places.
  */
 export const LOCATION_KEY = 'terminal.integrated.defaultLocation';
@@ -147,7 +147,7 @@ export function enableAutoTasks() {
 }
 
 /**
- * VSCode revives terminals itself across restarts. The revived shell relaunches
+ * VS Code revives terminals itself across restarts. The revived shell relaunches
  * empty, because the process that was running in it (claude) is gone. With
  * restore also spawning terminals, you get both: two empty shells beside two
  * resumed chats. Turning this off leaves restore as the single owner.
@@ -258,8 +258,8 @@ export function setBooleanSetting(key, value) {
 }
 
 /**
- * VSCode's own terminal revival, which duplicates what restore does.
- * Unset means on: VSCode enables persistent sessions by default.
+ * VS Code's own terminal revival, which duplicates what restore does.
+ * Unset means on: VS Code enables persistent sessions by default.
  */
 export function readPersistentSessions() {
   const s = readBooleanSetting(PERSISTENCE_KEY);
@@ -280,5 +280,5 @@ export function setTerminalLocation(location) {
 
 export function readTerminalLocation() {
   const s = readUserSetting(LOCATION_KEY);
-  return { ...s, value: s.value ?? null, effective: s.value ?? 'unset (VSCode restores per-terminal)' };
+  return { ...s, value: s.value ?? null, effective: s.value ?? 'unset (VS Code restores per-terminal)' };
 }

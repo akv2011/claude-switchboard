@@ -1,7 +1,7 @@
 /**
  * Claude accounts through claude-swap (cswap), the parts that are safe to
  * drive from a window: read the accounts, switch the active one, and start a
- * chat as a given account in a VSCode terminal.
+ * chat as a given account in a VS Code terminal.
  *
  * claude-swap is optional. Without `cswap` on PATH (or in ~/.local/bin) the
  * window hides the Accounts tab and the recorder sends no usage notifications.
@@ -77,7 +77,7 @@ export function switchAccount(number) {
   });
 }
 
-/** A new chat as account N in a VSCode terminal on `cwd`; other terminals keep their account. */
+/** A new chat as account N in a VS Code terminal on `cwd`; other terminals keep their account. */
 export function newChatAs(number, cwd) {
   const n = known(number);
   if (!n) return Promise.resolve({ ok: false, error: `no account ${number}` });
