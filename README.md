@@ -45,7 +45,21 @@ Two parts:
 
 ## Screenshots
 
-Screenshots are not included yet; they would show the author's own chats. Contributions of screenshots taken on a clean demo store are welcome.
+Every name, path, account and number below is invented by `scripts/demo-overview.mjs`; none of it comes from a real machine.
+
+![All chats: both machines' load, a restore offer after a shutdown, a background agent and the chats waiting on you, grouped by project](docs/images/overview.png)
+
+A chat's detail panel: reply from the window, change its settings, open or move it, and read its last reply rendered.
+
+![Detail panel for a chat waiting on you, with its last reply as formatted text](docs/images/detail.png)
+
+A chat running on the second machine, with its live terminal screen refreshed every 2 seconds.
+
+![Detail panel for a chat on the remote machine, showing its live screen](docs/images/remote.png)
+
+![Accounts tab: 5-hour, weekly and per-model usage for each claude-swap account, with switch and start-as buttons](docs/images/accounts.png)
+
+![New chat form: folder, name, model, effort, permission mode, account and machine](docs/images/new-chat.png)
 
 ## Requirements
 

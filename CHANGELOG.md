@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Screenshots in the README, taken from an invented demo overview (`scripts/demo-overview.mjs`).
+- A remote chat waiting on you no longer cuts off "Needs you" next to a longer machine name.
+- The New chat form has side padding, and its note is set in the body font.
+
 ## 1.0.0
 
 First public release, as Claude Switchboard.
