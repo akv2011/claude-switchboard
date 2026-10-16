@@ -95,20 +95,22 @@ export function writeSnapshot(sessions) {
     // and replacing the offer each time dropped whichever died first, so a
     // machine that took two polls to go down came back offering the stragglers
     // only. While chats are still missing the offer accumulates instead.
-    // Working in a folder again answers the question restore was asking. Whatever
-    // is live becomes the baseline on the very next poll, so an offer never
-    // outlives the session it belonged to.
+    // Working in a folder again answers the question restore was asking: a chat
+    // live now that was not on the last poll, brought back or new. Chats that
+    // simply kept running do not, or a chat that stopped beside them would be
+    // offered for one poll only.
     //
     // The deliberate cost: chats waiting to be restored are dropped if you start
     // something new in that folder first. Restore before you start, or Dismiss.
     //
     // The vanished branch wins, because a teardown also passes through polls
     // where something is still live and must accumulate rather than reset.
+    const priorIds = new Set((prior?.sessions ?? []).map((s) => s.sessionId));
+    const acted = live.some((s) => !priorIds.has(s.sessionId));
     let lastLiveSet;
     if (vanished.length) {
       lastLiveSet = mergeByOpenOrder(outstanding ? prior.lastLiveSet : [], prior?.sessions ?? live);
-    } else if (live.length) lastLiveSet = live;
-    else if (outstanding) lastLiveSet = prior.lastLiveSet;
+    } else if (outstanding && !acted) lastLiveSet = prior.lastLiveSet;
     else lastLiveSet = live;
 
     workspaces[root] = {

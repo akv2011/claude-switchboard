@@ -276,6 +276,20 @@ test('THE RULE: anything not running is always offered', () => {
   assert.deepEqual(offered(), ['A', 'B', 'C']);
 });
 
+test('an offer holds while the chats left in its folder keep running', () => {
+  // A chat that stopped while others kept running in its folder was offered for
+  // one poll (30 s), then replaced by the live set.
+  const root = workspace('kept');
+  const stays = { sessionId: 'kept-a', cwd: root, name: 'Stays', startedAt: 1 };
+  const stops = { sessionId: 'kept-b', cwd: root, name: 'Stops', startedAt: 2 };
+  const offered = () => (restorableWorkspaces(readSnapshot(), undefined, new Set())
+    .find((w) => w.root === root)?.sessions ?? []).map((s) => s.name);
+  writeSnapshot([stays, stops]);
+  writeSnapshot([stays]);
+  for (let i = 0; i < 5; i += 1) writeSnapshot([stays]);
+  assert.deepEqual(offered(), ['Stops']);
+});
+
 test('an offer does not expire while it sits unused', () => {
   const two = ['P', 'Q'].map((n) => ({ sessionId: n, cwd: W.keep, name: n }));
   writeSnapshot(two);
