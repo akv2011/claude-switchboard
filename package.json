@@ -1,6 +1,6 @@
 {
   "name": "claude-switchboard",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "One window for every Claude Code chat across every machine you own: see what each is doing, steer it, restore it after a shutdown, and share the work with a second computer.",
   "type": "module",
   "bin": {

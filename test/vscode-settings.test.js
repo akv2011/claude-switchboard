@@ -112,7 +112,7 @@ test('a missing settings.json is created rather than erroring', () => {
   assert.equal(readAutoTaskSetting().enabled, true);
 });
 
-test('an unset persistence flag reads as on, because VSCode defaults to on', () => {
+test('an unset persistence flag reads as on, because VS Code defaults to on', () => {
   writeSettings('{ "editor.fontSize": 13 }');
   const p = readPersistentSessions();
   assert.equal(p.present, false);

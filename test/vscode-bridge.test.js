@@ -1,5 +1,5 @@
 /**
- * The app side of the VSCode bridge: a request a window reports done comes
+ * The app side of the VS Code bridge: a request a window reports done comes
  * back ok and focuses that window; an unclaimed request opens the chat's
  * folder once, then gives up with the command to run by hand.
  */
@@ -13,7 +13,7 @@ import { runInVscodeTerminal, shq } from '../src/core/vscode-bridge.js';
 
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-bridge-'));
 
-/** Plays one VSCode window: answers the first request it sees. */
+/** Plays one VS Code window: answers the first request it sees. */
 function fakeWindow(root, reply) {
   const timer = setInterval(() => {
     const dir = path.join(root, 'requests');

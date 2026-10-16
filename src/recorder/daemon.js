@@ -85,7 +85,7 @@ export function pollOnce(options = {}) {
 
 /**
  * Oldest first, so chats come back in the order you opened them rather than in
- * whatever order readdir happened to return the registry files. VSCode does not
+ * whatever order readdir happened to return the registry files. VS Code does not
  * expose tab order, and opening order is the closest honest proxy for it. Ties
  * and missing timestamps fall back to the name so the result is never arbitrary.
  */

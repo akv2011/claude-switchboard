@@ -135,8 +135,8 @@ export function canBeWorkspaceRoot(cwd) {
  * Such a chat is invisible even to `claude agents --json`, and its conversation
  * is never written to disk.
  *
- * Restore launches VSCode, and every terminal in that window inherits whatever
- * VSCode was launched with, so these must be stripped at both points.
+ * Restore launches VS Code, and every terminal in that window inherits whatever
+ * VS Code was launched with, so these must be stripped at both points.
  */
 export const INHERITED_CLAUDE_VARS = [
   'CLAUDECODE',

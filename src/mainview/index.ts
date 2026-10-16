@@ -11,6 +11,7 @@
 
 import { Electroview } from 'electrobun/view';
 import { md } from '../core/markdown.js';
+import { askAgainOnTimeout } from '../core/ask.js';
 
 /**
  * In a plain browser (the design harness, test/harness/) there is no host.
@@ -39,7 +40,7 @@ const call = (name: string, payload: unknown = {}) => {
     const canned = (mock as any).__rpc?.[name];
     return Promise.resolve(name === 'overview' ? mock : canned ?? { ok: false, error: 'not available in the harness' });
   }
-  return (electroview!.rpc as any).request[name](payload);
+  return askAgainOnTimeout(name, () => (electroview!.rpc as any).request[name](payload));
 };
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -330,7 +331,7 @@ function renderMachines() {
         const list = members.filter(movable);
         const label = kind === 'family' ? value : shortPath(value);
         if (!list.length) toast(`Nothing in ${label} to move: none of its chats is open and idle on the Mac.`);
-        else confirmBox(`Move ${list.length} idle chat${list.length === 1 ? '' : 's'} from ${label} to ${R()}?`, `Each one closes here and reopens in its own VSCode terminal, running on ${R()}.`, () => batchToRemote(list), 'Move them');
+        else confirmBox(`Move ${list.length} idle chat${list.length === 1 ? '' : 's'} from ${label} to ${R()}?`, `Each one closes here and reopens in its own VS Code terminal, running on ${R()}.`, () => batchToRemote(list), 'Move them');
         return;
       }
       const id = e.dataTransfer?.getData('text/session-id');
@@ -347,7 +348,7 @@ async function moveFlow(s: Session, target: 'mac' | 'remote', force = false, con
   if (target === 'mac') {
     if (s.machine !== 'remote' && s.lastMachine !== 'remote') { toast(`${s.name} is already on the Mac.`); return; }
     if (!confirmed) {
-      confirmBox(`Move ${s.name} back to the Mac?`, `It closes on ${R()}, its transcript and project folder come back now, and it reopens in its VSCode terminal here.`, () => moveFlow(s, target, false, true), 'Move it', 'Cancel');
+      confirmBox(`Move ${s.name} back to the Mac?`, `It closes on ${R()}, its transcript and project folder come back now, and it reopens in its VS Code terminal here.`, () => moveFlow(s, target, false, true), 'Move it', 'Cancel');
       return;
     }
     toast(`Moving ${s.name} to the Mac…`);
@@ -360,14 +361,14 @@ async function moveFlow(s: Session, target: 'mac' | 'remote', force = false, con
   if (!state!.remote.reachable) { toast(`${R()} is unreachable.`, 'error'); return; }
   // A live chat is closed here first; one keystroke or drop must not do that unasked.
   if (s.live && !confirmed && !force) {
-    confirmBox(`Move ${s.name} to ${R()}?`, `It closes here, its project folder and transcript are copied over, and it reopens in the same VSCode terminal, running on ${R()}.`, () => moveFlow(s, target, false, true), 'Move it', 'Cancel');
+    confirmBox(`Move ${s.name} to ${R()}?`, `It closes here, its project folder and transcript are copied over, and it reopens in the same VS Code terminal, running on ${R()}.`, () => moveFlow(s, target, false, true), 'Move it', 'Cancel');
     return;
   }
   toast(`Moving ${s.name} to ${R()}…`);
   const r = s.live ? await call('moveLive', { sessionId: s.sessionId, force }) : await call('moveToRemote', { sessionId: s.sessionId });
   if (r.busy) { confirmBox(`${s.name} is working right now.`, `Interrupt it and move it to ${R()}?`, () => moveFlow(s, target, true, true)); return; }
   if (!r.ok) { toast(r.error, 'error'); return; }
-  const where = r.reopened?.ok ? (r.reopened.reused ? ', back in the same VSCode terminal' : ', open in a VSCode terminal') : '';
+  const where = r.reopened?.ok ? (r.reopened.reused ? ', back in the same VS Code terminal' : ', open in a VS Code terminal') : '';
   if (r.verified === false) toast(r.error, 'error');
   else if (r.reopened && !r.reopened.ok) toast(`${s.name} is running on ${R()}. ${r.reopened.error}`, 'error');
   else toast(`${s.name} is running on ${R()}${where}.`, 'ok');
@@ -487,9 +488,9 @@ async function openDetail(s: Session) {
 }
 
 async function attach(s: Session) {
-  toast(`Opening ${s.name} in a VSCode terminal…`);
+  toast(`Opening ${s.name} in a VS Code terminal…`);
   const r = await call('attach', { name: s.name, cwd: s.cwd });
-  toast(r.ok ? `${s.name} is open in VSCode${r.folder ? ` (${shortPath(r.folder)})` : ''}.` : r.error, r.ok ? 'ok' : 'error');
+  toast(r.ok ? `${s.name} is open in VS Code${r.folder ? ` (${shortPath(r.folder)})` : ''}.` : r.error, r.ok ? 'ok' : 'error');
 }
 
 /** Every chat sharing this one's name, with what each one is, and Delete on the stopped ones. */
@@ -514,7 +515,7 @@ async function detailAction(s: Session, act: string, button: HTMLButtonElement) 
   if (act === 'interrupt') { await control(s, 'interrupt', '', `Interrupted ${s.name}.`); return; }
   if (act === 'continue') { await control(s, 'reply', 'continue', `Told ${s.name} to continue.`); return; }
   if (act === 'attach') { attach(s); return; }
-  if (act === 'open') { const r = await call('openProject', { cwd: s.cwd }); toast(r.ok ? `Opened ${shortPath(s.cwd)} in VSCode.` : r.error, r.ok ? 'ok' : 'error'); return; }
+  if (act === 'open') { const r = await call('openProject', { cwd: s.cwd }); toast(r.ok ? `Opened ${shortPath(s.cwd)} in VS Code.` : r.error, r.ok ? 'ok' : 'error'); return; }
   if (act === 'move') { moveFlow(s, 'remote'); return; }
   if (act === 'tomac') { moveFlow(s, 'mac'); return; }
   if (act === 'delete') openSheet(s);
@@ -800,7 +801,7 @@ $('nc-scrim').addEventListener('mousedown', (e) => { if (e.target === $('nc-scri
   go.disabled = false; go.textContent = 'Start';
   if (!r.ok) { toast(r.error, 'error'); return; }
   $('nc-scrim').hidden = true;
-  toast(`Started on ${r.machine === 'remote' ? R() : 'the Mac'}${r.why ? `, since ${r.why}` : ''}. It is open in a VSCode terminal.`);
+  toast(`Started on ${r.machine === 'remote' ? R() : 'the Mac'}${r.why ? `, since ${r.why}` : ''}. It is open in a VS Code terminal.`);
   lastFingerprint = ''; window.setTimeout(refresh, 4000);
 };
 
@@ -917,7 +918,7 @@ function renderAccountsPage() {
       </footer>
       <form class="acard-new" hidden>
         <label>Folder <select name="cwd">${options}</select></label>
-        <button class="btn btn-primary" type="submit">Open in VSCode</button>
+        <button class="btn btn-primary" type="submit">Open in VS Code</button>
         <span class="acard-hint">Runs <code>cswap run ${a.number}</code> in a new terminal there. Other terminals keep their account.</span>
       </form>
     </article>`;
@@ -973,7 +974,7 @@ function renderOffer() {
     : `${groups.length} folder${groups.length === 1 ? '' : 's'}`;
   const split = onRemote
     ? `${onMac} on the Mac, <span class="remote">${onRemote} on ${escapeHtml(R())}</span>${unreachable ? ' <span class="down">(unreachable, those will wait)</span>' : ''}`
-    : 'They reopen in VSCode terminals.';
+    : 'They reopen in VS Code terminals.';
 
   const card = document.createElement('div');
   card.className = 'offer';
@@ -990,7 +991,7 @@ function renderOffer() {
   if (onMac && !state!.autoTasks?.enabled) {
     const note = document.createElement('div');
     note.className = 'note';
-    note.innerHTML = `<span class="note-body"><strong>VSCode will not start the restored terminals.</strong>
+    note.innerHTML = `<span class="note-body"><strong>VS Code will not start the restored terminals.</strong>
       Automatic tasks are off in your user settings.</span>
       <button class="btn" id="fix-autotasks" type="button">Turn on automatic tasks</button>`;
     host.appendChild(note);
@@ -1005,12 +1006,12 @@ function renderOffer() {
     const note = document.createElement('div');
     note.className = 'note';
     note.innerHTML = `<span class="note-body"><strong>You will also get empty terminals.</strong>
-      VSCode reopens its own terminals, and the chats that ran in them have exited.</span>
+      VS Code reopens its own terminals, and the chats that ran in them have exited.</span>
       <button class="btn" id="fix-persistence" type="button">Let restore own it</button>`;
     host.appendChild(note);
     $('fix-persistence').onclick = async () => {
       const r = await call('disablePersistence');
-      toast(r.ok ? 'VSCode will stop reopening its own terminals.' : r.error, r.ok ? 'ok' : 'error');
+      toast(r.ok ? 'VS Code will stop reopening its own terminals.' : r.error, r.ok ? 'ok' : 'error');
       lastFingerprint = '';
       await refresh();
     };
@@ -1031,9 +1032,9 @@ function renderOffer() {
       toast(`${failed.length} part${failed.length === 1 ? '' : 's'} failed: ${failed[0].error}`, 'error');
     } else {
       const bits = [];
-      if (macChats) bits.push(`${macChats} chat${macChats === 1 ? '' : 's'} reopened in VSCode terminals`);
-      if (macFolders) bits.push(`VSCode is opening ${macFolders} folder${macFolders === 1 ? '' : 's'}`);
-      if (remoteStarted) bits.push(`${remoteStarted} started on ${R()}${remoteAttached ? `, ${remoteAttached} open in VSCode` : ', attach from a row'}`);
+      if (macChats) bits.push(`${macChats} chat${macChats === 1 ? '' : 's'} reopened in VS Code terminals`);
+      if (macFolders) bits.push(`VS Code is opening ${macFolders} folder${macFolders === 1 ? '' : 's'}`);
+      if (remoteStarted) bits.push(`${remoteStarted} started on ${R()}${remoteAttached ? `, ${remoteAttached} open in VS Code` : ', attach from a row'}`);
       toast(bits.join('. ') || 'Nothing needed starting.');
       dismissed.add(key);
       renderOffer();
@@ -1103,7 +1104,7 @@ function fillRow(row: HTMLElement, s: Session, sig: string, sub = false) {
       : (s.live ? 'Running tools, no reply to show yet' : 'No reply recorded')}</div>`;
 
   const canMove = !s.live && Boolean(s.cwd) && state!.remote.reachable;
-  // A remote chat lives in tmux and a Mac chat in a VSCode terminal; both can
+  // A remote chat lives in tmux and a Mac chat in a VS Code terminal; both can
   // be typed into from here, the Mac one through the bridge extension.
   const actions = remoteDown(s) ? ''
     : s.live && s.stoppedOn
@@ -1113,9 +1114,9 @@ function fillRow(row: HTMLElement, s: Session, sig: string, sub = false) {
       ? `<button class="act" data-kind="reply" type="button" aria-label="Reply to ${escapeHtml(s.name)}">Reply</button>
          <button class="act" data-kind="attach" type="button" aria-label="Attach to ${escapeHtml(s.name)} in Terminal">Attach</button>
          <button class="act" data-kind="more" type="button" aria-label="Model, effort and permission for ${escapeHtml(s.name)}" aria-haspopup="dialog">&middot;&middot;&middot;</button>`
-      : `<button class="act" data-kind="reply" type="button" aria-label="Reply to ${escapeHtml(s.name)}" title="Typed into its VSCode terminal once it is idle">Reply</button>
+      : `<button class="act" data-kind="reply" type="button" aria-label="Reply to ${escapeHtml(s.name)}" title="Typed into its VS Code terminal once it is idle">Reply</button>
          <button class="act" data-kind="more" type="button" aria-label="Model, effort and permission for ${escapeHtml(s.name)}" aria-haspopup="dialog">&middot;&middot;&middot;</button>
-         <button class="act" data-kind="open" type="button" aria-label="Open the folder of ${escapeHtml(s.name)} in VSCode">Open</button>`)
+         <button class="act" data-kind="open" type="button" aria-label="Open the folder of ${escapeHtml(s.name)} in VS Code">Open</button>`)
     : !hasRemote() ? ''
     : `<button class="act" data-kind="move" type="button" aria-label="Move ${escapeHtml(s.name)} to ${escapeHtml(R())}"${
       canMove ? '' : ` disabled title="${state!.remote.reachable ? 'No folder known' : `${escapeHtml(R())} unreachable`}"`}>To ${escapeHtml(R())}</button>`;
@@ -1181,7 +1182,7 @@ function agentsBlock(): HTMLElement | null {
       <span class="agent-where" title="${escapeHtml(a.cwd ?? '')}">${escapeHtml(baseName(a.cwd))}</span>
       <span class="num" title="Last moved ${a.updatedAt ? new Date(a.updatedAt).toLocaleString() : 'unknown'}">${ago(a.updatedAt)}</span>
       <span class="actions">
-        <button class="act" type="button" data-agent-do="open" aria-label="Open ${escapeHtml(a.name)} in a VSCode terminal">Open</button>
+        <button class="act" type="button" data-agent-do="open" aria-label="Open ${escapeHtml(a.name)} in a VS Code terminal">Open</button>
         ${a.suggestedReply ? `<button class="act" type="button" data-agent-do="copy" title="Suggested reply: ${escapeHtml(a.suggestedReply)}">Copy reply</button>` : ''}
         <button class="act act-del" type="button" data-agent-do="stop" aria-label="Stop ${escapeHtml(a.name)}" title="Stop it. The conversation is kept.">&#x2715;</button>
       </span>
@@ -1197,7 +1198,7 @@ function agentsBlock(): HTMLElement | null {
       const act = b.dataset.agentDo;
       if (act === 'open') {
         const r = await call('openAgent', { id });
-        toast(r.ok ? `${a.name} is open in a VSCode terminal.` : r.error, r.ok ? 'ok' : 'error');
+        toast(r.ok ? `${a.name} is open in a VS Code terminal.` : r.error, r.ok ? 'ok' : 'error');
       } else if (act === 'copy') {
         const r = await call('copyText', { text: a.suggestedReply });
         toast(r.ok ? `Copied: "${a.suggestedReply}". Paste it after opening ${a.name}.` : r.error, r.ok ? 'ok' : 'error');
@@ -1254,7 +1255,7 @@ function renderBatch() {
 /**
  * Move several chats to the remote one at a time, so each is verified there
  * before the next, and the toast says how far it got. Live ones reopen in
- * their own VSCode terminal; stopped ones start on the remote and open in one.
+ * their own VS Code terminal; stopped ones start on the remote and open in one.
  */
 async function batchToRemote(list: Session[]) {
   let moved = 0;
@@ -1269,17 +1270,17 @@ async function batchToRemote(list: Session[]) {
     lastFingerprint = '';
     await refresh();
   }
-  toast(failed.length ? `Moved ${moved} of ${list.length}. ${failed[0]}` : `Moved ${moved} to ${R()}, each open in a VSCode terminal.`, failed.length ? 'error' : 'ok');
+  toast(failed.length ? `Moved ${moved} of ${list.length}. ${failed[0]}` : `Moved ${moved} to ${R()}, each open in a VS Code terminal.`, failed.length ? 'error' : 'ok');
 }
 
 async function batchOpenOnMac(list: Session[]) {
   const byCwd = new Map<string, Session[]>();
   for (const s of list) (byCwd.get(s.cwd!) ?? byCwd.set(s.cwd!, []).get(s.cwd!)!).push({ ...s, machine: 'mac' });
-  toast(`Opening ${list.length} chats in VSCode terminals…`);
+  toast(`Opening ${list.length} chats in VS Code terminals…`);
   const written = await call('restore', { groups: [...byCwd].map(([cwd, sessions]) => ({ cwd, sessions })), launch: true });
   const started = written.reduce((sum: number, w: any) => sum + (w.started ?? 0), 0);
   const failed = written.find((w: any) => w.error);
-  toast(failed ? `Opened ${started}. ${failed.error}` : `Opened ${started} in VSCode terminals.`, failed ? 'error' : 'ok');
+  toast(failed ? `Opened ${started}. ${failed.error}` : `Opened ${started} in VS Code terminals.`, failed ? 'error' : 'ok');
   lastFingerprint = '';
   await refresh();
 }
@@ -1434,7 +1435,7 @@ $('rows').addEventListener('click', async (event) => {
       await control(session, 'reply', 'continue', `Told ${session.name} to continue.`);
     } else if (kind === 'open') {
       const r = await call('openProject', { cwd: session.cwd });
-      toast(r.ok ? `Opened ${shortPath(session.cwd)} in VSCode.` : r.error, r.ok ? 'ok' : 'error');
+      toast(r.ok ? `Opened ${shortPath(session.cwd)} in VS Code.` : r.error, r.ok ? 'ok' : 'error');
     } else if (kind === 'move') {
       button.textContent = 'Moving…';
       await moveFlow(session, 'remote');

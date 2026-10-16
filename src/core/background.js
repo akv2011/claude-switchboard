@@ -83,7 +83,7 @@ export function readBackground({ force = false } = {}) {
 
 const knownAgent = (id) => readBackground().agents.find((a) => a.id === id) ?? null;
 
-/** Open the agent in a VSCode terminal in its folder: `claude attach <id>`. */
+/** Open the agent in a VS Code terminal in its folder: `claude attach <id>`. */
 export function openAgent(id) {
   const a = knownAgent(id);
   if (!a) return Promise.resolve({ ok: false, error: 'no such blocked agent' });

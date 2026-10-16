@@ -1,7 +1,7 @@
 /**
- * Lets Claude Switchboard type a command into a VSCode terminal.
+ * Lets Claude Switchboard type a command into a VS Code terminal.
  *
- * The app drops a request file; every VSCode window watches the folder. The
+ * The app drops a request file; every VS Code window watches the folder. The
  * window that owns the terminal whose shell pid matches takes it and types into
  * that terminal, so a chat moved to the remote machine comes back in the terminal it ran
  * in. Without a matching terminal (or when it has closed), the window opened on

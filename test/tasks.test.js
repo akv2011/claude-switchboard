@@ -100,7 +100,7 @@ test('writing produces a real tasks.json', () => {
 });
 
 test('it does NOT write task.allowAutomaticTasks into the workspace', () => {
-  // That setting is application-scoped (VSCode schema: scope 1), so a workspace
+  // That setting is application-scoped (VS Code schema: scope 1), so a workspace
   // copy is read by nobody. Writing it produced a file that looked like it had
   // enabled something and had not, which is how restore came to do nothing.
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'csr-proj-'));
@@ -109,7 +109,7 @@ test('it does NOT write task.allowAutomaticTasks into the workspace', () => {
   assert.equal(fs.existsSync(settingsFile), false, 'inert workspace setting must not be written');
 });
 
-test('the result reports whether VSCode will actually run the tasks', () => {
+test('the result reports whether VS Code will actually run the tasks', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'csr-proj-'));
   const result = writeRestoreTasks(cwd, sessions);
   assert.ok(result.autoTasks, 'callers need to know the tasks may never fire');
@@ -144,7 +144,7 @@ test('clearing removes only generated tasks', () => {
 
 test('tasks share a group, because that is the only way they all run', () => {
   // Measured with four tasks in fresh folders: a shared group ran 4 of 4, no
-  // group ran 2 of 4. VSCode shows grouped tasks as split panes, which is a
+  // group ran 2 of 4. VS Code shows grouped tasks as split panes, which is a
   // real cost, but restoring two chats out of four is a worse one.
   for (const task of buildTasks(sessions)) {
     assert.equal(task.presentation.group, 'claude');

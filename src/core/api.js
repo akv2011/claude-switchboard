@@ -96,7 +96,7 @@ export function getOverview(options = {}) {
       liveCount: project.liveCount,
       sessionCount: project.sessions.length,
       sessions: project.sessions,
-      // Inclusive of subfolders, which is the unit a VSCode window restores.
+      // Inclusive of subfolders, which is the unit a VS Code window restores.
       depth: project.depth,
       parent: project.parent,
       allSessions: project.allSessions,
@@ -159,7 +159,7 @@ export function splitByMachine(sessions) {
 }
 
 /**
- * One named VSCode terminal per chat, in the window on its folder (opened if
+ * One named VS Code terminal per chat, in the window on its folder (opened if
  * none is). Unlike folderOpen tasks this works on a window that is already
  * open and gives tabs, not split panes. Sequential, which also staggers the
  * starts: each request takes 1.5 to 5 s.
@@ -190,7 +190,7 @@ async function attachEach(root, sessions) {
 /**
  * Bring an offer back, each chat on the machine it ran on.
  *
- * Mac chats go through the VSCode bridge, or VSCode tasks without it. Remote
+ * Mac chats go through the VS Code bridge, or VS Code tasks without it. Remote
  * chats are resumed in tmux over there; their transcripts are on the remote's
  * disk, so nothing is copied.
  */
@@ -209,7 +209,7 @@ export async function restoreGroups(groups, options = {}) {
     }
     if (remote.length) {
       const result = await resumeOnRemote(remote);
-      // Watch them where the person works: one VSCode terminal per remote chat.
+      // Watch them where the person works: one VS Code terminal per remote chat.
       const attached = result.ok && options.launch !== false && bridgeInstalled()
         ? await attachEach(group.cwd, remote)
         : 0;
@@ -221,7 +221,7 @@ export async function restoreGroups(groups, options = {}) {
 }
 
 /**
- * Open a remote chat in a VSCode terminal in its project folder, or in the
+ * Open a remote chat in a VS Code terminal in its project folder, or in the
  * terminal it last ran in when `shellPid` names one. Terminal.app only when
  * the chat has no folder on this Mac to open.
  */
@@ -369,7 +369,7 @@ export async function moveLiveSession({ sessionId, force = false, reopen = true 
       const after = readRemoteLive({ remote: config, force: true });
       const entry = after.sessions.find((s) => String(s.sessionId).toLowerCase() === key);
       if (entry) {
-        // Bring it back where it was: the same VSCode terminal when it ran in one.
+        // Bring it back where it was: the same VS Code terminal when it ran in one.
         const reopened = live && reopen && cwd ? await attachSession({ name: entry.name ?? name, cwd, shellPid }) : null;
         return { ok: true, verified: true, closedOnMac: Boolean(live), reopened };
       }
@@ -387,7 +387,7 @@ export async function moveLiveSession({ sessionId, force = false, reopen = true 
  * (local apps, attached drives). Checked first: the transcript exists on the
  * remote and the folder on the Mac. Then the idle chat is closed there, its
  * transcript and project folder are copied back (newer copy wins), and it
- * resumes in the VSCode terminal that was attached to it.
+ * resumes in the VS Code terminal that was attached to it.
  */
 export async function moveToLocal({ sessionId }) {
   const key = String(sessionId).toLowerCase();
@@ -412,7 +412,7 @@ export async function moveToLocal({ sessionId }) {
   movingNow.add(key);
   moving.set(key, Date.now());
   try {
-    // The VSCode terminal attached to it over ssh, so it comes back in the same tab.
+    // The VS Code terminal attached to it over ssh, so it comes back in the same tab.
     let shellPid = null;
     try {
       const tmux = tmuxName(name);
@@ -444,7 +444,7 @@ export async function moveToLocal({ sessionId }) {
  * (pressure, swapping, memory used; see load.js) and the remote has room.
  * Never touches a chat that is working or waiting on the person, and never
  * pushes the remote itself out of "ok". Each moved chat reopens in its own
- * VSCode terminal.
+ * VS Code terminal.
  */
 /**
  * One recorder tick of automatic balancing (see autobalance.js). Saves the
@@ -525,7 +525,7 @@ export function checkControl(action, value) {
 }
 
 /**
- * Type into a chat open on this Mac, in its VSCode terminal. A reply waits for
+ * Type into a chat open on this Mac, in its VS Code terminal. A reply waits for
  * the chat to be idle or waiting on you, so it never lands in the middle of
  * your own typing or its work; Esc is the exception, it is for that.
  */
@@ -576,7 +576,7 @@ export function chooseMachine(choice, { macLevel, remoteLevel, remoteReachable, 
   return { machine: 'mac', why: remoteCan ? 'the Mac has room' : 'that folder only runs on the Mac' };
 }
 
-/** Start a chat with a name, model, effort, permission, account and machine, in a VSCode terminal. */
+/** Start a chat with a name, model, effort, permission, account and machine, in a VS Code terminal. */
 export async function newChat({ cwd, name = '', model, effort, permission, account = null, machine = 'auto' }) {
   if (typeof cwd !== 'string' || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) return { ok: false, error: 'pick a folder that exists' };
   if (name && !/^[A-Za-z0-9 _.()-]{1,60}$/.test(name)) return { ok: false, error: 'a name is letters, digits, spaces and _ . - ( ), up to 60' };
@@ -640,7 +640,7 @@ export function performDelete(session) {
 }
 
 /**
- * Write restore tasks for one folder and optionally open it in VSCode.
+ * Write restore tasks for one folder and optionally open it in VS Code.
  *
  * @param {string} cwd
  * @param {Array<{sessionId:string,name:string}>} sessions
@@ -662,7 +662,7 @@ export function clearProject(cwd) {
 /**
  * Fire and forget: `code <folder>`. Failure here is reported, never fatal.
  *
- * Launched with the Claude session markers stripped. VSCode passes its own
+ * Launched with the Claude session markers stripped. VS Code passes its own
  * environment to every terminal it opens, so inheriting them turned each chat in
  * that window into a child session with transcript saving off, including ones
  * opened by hand long afterwards.
@@ -676,5 +676,5 @@ export function openInVscode(cwd) {
 
 export const recorder = launchd;
 
-/** VSCode will not auto-run restored terminals unless this is on. */
+/** VS Code will not auto-run restored terminals unless this is on. */
 export { readAutoTaskSetting, enableAutoTasks, readPersistentSessions, setPersistentSessions };
