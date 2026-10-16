@@ -1,0 +1,59 @@
+#!/bin/bash
+# Keep the remote machine's Claude Code setup matching this one, and copy its transcripts back.
+#   here -> remote: CLAUDE.md, skills, plugins, hooks, keybindings, and a settings.json made
+#                   for the remote (plugins it cannot run turned off, local-only hooks dropped).
+#   remote -> here: transcripts, newer copy wins, nothing here is ever deleted.
+# Run it every few minutes from launchd (see docs/SHARED-COMPUTE.md). Settings come from the
+# same ~/.config/offload/config as offload:
+#   host=devbox
+#   disable_plugins=playwright@claude-plugins-official,chrome-devtools-mcp@claude-plugins-official
+#   drop_hooks=mutagen          a regex: SessionStart hook commands matching it are not copied
+set -euo pipefail
+conf=${OFFLOAD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/offload/config}
+host= disable= drop=
+if [ -f "$conf" ]; then
+  while IFS='=' read -r key value; do
+    case $key in host) host=$value ;; disable_plugins) disable=$value ;; drop_hooks) drop=$value ;; esac
+  done < <(grep -E '^(host|disable_plugins|drop_hooks)=' "$conf")
+fi
+HOST=${OFFLOAD_HOST:-$host}
+[ -n "$HOST" ] || { echo "claude-sync: set host= in $conf or OFFLOAD_HOST" >&2; exit 2; }
+RSYNC=$(command -v rsync)
+command -v jq >/dev/null || { echo "claude-sync: needs jq" >&2; exit 2; }
+C=$HOME/.claude
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=5"
+LOG=$HOME/.offload/claude-sync.log
+mkdir -p "$(dirname "$LOG")"
+[ -t 1 ] || exec >>"$LOG" 2>&1
+echo "$(date '+%F %T') start"
+$SSH "$HOST" true 2>/dev/null || { echo "$HOST unreachable, skipped"; exit 0; }
+
+# This machine wins for configuration. --delete so a removed skill or plugin goes there too.
+[ -d "$C/skills" ] && $RSYNC -a --delete -e "$SSH" "$C/skills/" "$HOST:.claude/skills/"
+[ -d "$C/plugins" ] && $RSYNC -a --delete -e "$SSH" "$C/plugins/" "$HOST:.claude/plugins/"
+[ -d "$C/hooks" ] && $RSYNC -a -e "$SSH" --exclude '*.log' --exclude '*-state.json' "$C/hooks/" "$HOST:.claude/hooks/"
+for f in CLAUDE.md keybindings.json; do [ -f "$C/$f" ] && $RSYNC -a -e "$SSH" "$C/$f" "$HOST:.claude/"; done
+
+# An organization-wide rules file lives at a different path on each OS
+# (macOS /Library/Application Support/ClaudeCode, Linux /etc/claude-code).
+org="/Library/Application Support/ClaudeCode/CLAUDE.md"
+if [ -f "$org" ]; then
+  $SSH "$HOST" 'sudo -n mkdir -p /etc/claude-code && sudo -n tee /etc/claude-code/CLAUDE.md >/dev/null && sudo -n chmod 644 /etc/claude-code/CLAUDE.md' < "$org" ||
+    echo "skipped the organization rules file: passwordless sudo is needed on $HOST"
+fi
+
+# settings.json for the remote: plugins it cannot run (a browser it does not have) off, and
+# SessionStart hooks that only make sense here dropped.
+if [ -f "$C/settings.json" ]; then
+  jq --arg disable "$disable" --arg drop "$drop" '
+    reduce ($disable | split(",") | map(select(length > 0)))[] as $p (.; .enabledPlugins[$p] = false)
+    | if ($drop | length) > 0 and .hooks.SessionStart then
+        .hooks.SessionStart |= map(.hooks |= map(select((.command // "") | test($drop) | not)))
+      else . end' "$C/settings.json" |
+    $SSH "$HOST" 'cat > ~/.claude/settings.json.tmp && mv ~/.claude/settings.json.tmp ~/.claude/settings.json'
+fi
+
+# Transcripts back. --update: a chat runs on one machine at a time, so the newer file is the
+# longer one. No --delete: the remote's own transcript cleanup must never remove copies here.
+$RSYNC -a --update --exclude '/*/memory/' -e "$SSH" "$HOST:.claude/projects/" "$C/projects/"
+echo "$(date '+%F %T') done"

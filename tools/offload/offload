@@ -1,0 +1,400 @@
+#!/bin/bash
+# offload: run a command on a second machine in the same directory, with the project synced both
+# ways by a Mutagen session, and run Claude Code there in tmux. See docs/SHARED-COMPUTE.md.
+#
+# Settings come from the environment or from ~/.config/offload/config (one key=value per line):
+#   host=devbox                  ssh host or alias, key login without a prompt   (OFFLOAD_HOST)
+#   projects=~/Projects          the folder that holds your projects             (OFFLOAD_PROJECTS)
+# The remote must have the same absolute path for every project (same user and home layout),
+# because Mutagen syncs <path> here to <host>:<path> there.
+set -euo pipefail
+
+conf=${OFFLOAD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/offload/config}
+cfg_host= cfg_projects=
+if [ -f "$conf" ]; then
+  while IFS='=' read -r key value; do
+    case $key in host) cfg_host=$value ;; projects) cfg_projects=$value ;; esac
+  done < <(grep -E '^(host|projects)=' "$conf")
+fi
+HOST=${OFFLOAD_HOST:-$cfg_host}
+PROJECTS=${OFFLOAD_PROJECTS:-${cfg_projects:-$HOME/Projects}}
+PROJECTS=${PROJECTS/#\~/$HOME}
+STATE=$HOME/.offload
+LOGDIR=$STATE/logs
+LOCKDIR=$STATE/locks
+MAX_BYTES=5000000000
+IGNORES=(node_modules .venv venv __pycache__ .next .turbo .cache dist build target .pytest_cache coverage .DS_Store)
+
+usage() {
+  cat >&2 <<'EOF'
+usage: offload <cmd...>            run cmd on the remote in this directory, files synced both ways
+       offload -d <name> <cmd...>  start cmd as a detached tmux job on the remote
+       offload logs <name>         follow a job's log (last 100 lines when not a terminal)
+       offload ls                  list tmux sessions on the remote
+       offload stop <name>         stop a job
+       offload -p <port>           make remote localhost:<port> answer on local localhost:<port>
+       offload -p stop <port>      close that forward
+       offload claude [name] [-- flags]  start Claude Code on the remote in this project (tmux)
+       offload move <name|id>      move a closed local chat to the remote with its name and history
+       offload attach <name>       attach to a Claude Code chat running on the remote
+       offload status              list offload sync sessions with state and conflict counts
+       offload -- <cmd...>         run a command that shares a name with a subcommand
+Arguments arrive as argv, not as one shell string: use offload sh -c '...' for pipes and &&.
+Extra Mutagen ignore patterns go one per line in .offloadignore at the project root.
+Settings: host= and projects= in ~/.config/offload/config, or OFFLOAD_HOST and OFFLOAD_PROJECTS.
+EOF
+  exit 2
+}
+
+die() { echo "offload: $*" >&2; exit 1; }
+
+# POSIX single quotes, not printf %q: %q leaves == and =cmd bare, and zsh on the remote expands those.
+q() { local s=${1//\'/\'\\\'\'}; printf "'%s'" "$s"; }
+qargs() { local a out=; for a in "$@"; do out+="$(q "$a") "; done; printf '%s' "${out% }"; }
+
+is_tty() { [ -t 0 ] && [ -t 1 ]; }
+
+reach() {
+  [ -n "$HOST" ] || die "no remote set: put host=<ssh alias> in $conf, or set OFFLOAD_HOST"
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" true 2>/dev/null && return
+  echo "offload: cannot reach $HOST (ssh failed)" >&2
+  exit 255
+}
+
+# mutagen draws progress with \r; on failure keep only its last line, which holds the error.
+mut() {
+  local out
+  out=$(mutagen "$@" 2>&1) && return
+  printf '%s\n' "$out" | tr '\r' '\n' | grep '[^[:space:]]' | tail -n 1 >&2
+  return 1
+}
+
+valid_name() { [[ $1 =~ ^[A-Za-z0-9_-]+$ ]] || die "job name must be letters, digits, _ or -"; }
+
+project() {
+  here=$(pwd -P)
+  # The projects folder may itself be a repo holding many untracked projects, so its git
+  # toplevel would be the wrong root.
+  case $here/ in
+    "$PROJECTS"/?*/*) root=${here#"$PROJECTS"/}; root=$PROJECTS/${root%%/*} ;;
+    *) root=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null || echo "$here") ;;
+  esac
+  if [[ $root == / || $HOME/ == "$root"/* || $root == "$PROJECTS" ]]; then
+    die "refusing to sync $root; cd into a project folder first"
+  fi
+  name=offload-$(basename "$root" | tr -c 'A-Za-z0-9\n' - | cut -c1-40)-$(md5 -qs "$root" | cut -c1-8)
+
+  local p
+  patterns=("${IGNORES[@]}")
+  if [ -f "$root/.offloadignore" ]; then
+    while IFS= read -r p; do patterns+=("$p"); done < <(
+      sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' "$root/.offloadignore")
+  fi
+  opts=(--no-global-configuration --mode=two-way-safe --ignore-vcs --symlink-mode=posix-raw
+    --default-file-mode-beta=0644 --default-directory-mode-beta=0755)
+  for p in "${patterns[@]}"; do opts+=("--ignore=$p"); done
+  # Session settings are fixed at create time, so a changed .offloadignore must recreate the session.
+  cfg=$(printf '%s\n' "${opts[@]}" | md5 -q | cut -c1-12)
+}
+
+session_cfg() {
+  mutagen sync list --template '{{range .}}{{index .Labels "offload"}} {{end}}' "$name" 2>/dev/null || true
+}
+
+# Bytes Mutagen would sync, translating its ignore patterns to find; ! negations are skipped.
+synced_bytes() {
+  local p expr=()
+  for p in .git "${patterns[@]}"; do
+    [[ $p == '!'* ]] && continue
+    if [[ $p == */ ]]; then expr+=(-o '(' -type d); p=${p%/}; else expr+=(-o '('); fi
+    if [[ $p == */* ]]; then expr+=(-path "$root/${p#/}" ')'); else expr+=(-name "$p" ')'); fi
+  done
+  { find "$root" '(' "${expr[@]:1}" ')' -prune -o -type f -ls 2>/dev/null || true; } |
+    awk '{ s += $7 } END { printf "%.0f\n", s }'
+}
+
+create_session() {
+  local have bytes
+  have=$(session_cfg)
+  [ "$have" = "$cfg " ] && return
+  if [ "${OFFLOAD_FORCE:-}" != 1 ]; then
+    bytes=$(synced_bytes)
+    if [ "$bytes" -gt "$MAX_BYTES" ]; then
+      die "$root is $(awk "BEGIN { printf \"%.1f\", $bytes / 1e9 }") GB after ignores (limit 5 GB)." \
+        "Add big paths to $root/.offloadignore, or set OFFLOAD_FORCE=1 to sync it anyway"
+    fi
+  fi
+  if [ -n "$have" ]; then
+    echo "offload: sync settings changed, recreating session $name" >&2
+    mut sync terminate "$name"
+  fi
+  ssh "$HOST" "mkdir -p $(q "$(dirname "$root")")"
+  echo "offload: creating sync session $name for $root" >&2
+  mut sync create -n "$name" -l "offload=$cfg" "${opts[@]}" "$root" "$HOST:$root" ||
+    die "could not create the sync session"
+}
+
+# Many sessions may call offload at once, and Mutagen does not enforce unique names, so creation
+# runs under a flock. lockf releases on exit, so a crashed caller cannot leave a stale lock.
+ensure_session() {
+  [ "$(session_cfg)" = "$cfg " ] && return
+  mkdir -p "$LOCKDIR"
+  exec 9>"$LOCKDIR/$name.lock"
+  lockf 9
+  # fd 9 is closed for the subshell so a daemon or ssh master started in it cannot hold the lock.
+  (create_session) 9>&-
+  exec 9>&-
+}
+
+flush() {
+  mut sync flush "$name" && return
+  echo "offload: sync with $HOST failed; see offload status" >&2
+  return 1
+}
+
+# Lines are tagged "c " because mutagen appends a blank line and a root conflict has an empty path.
+report_conflicts() {
+  local line tpl='{{range .}}{{range .Conflicts}}c {{.Root}}{{"\n"}}{{end}}{{end}}'
+  { mutagen sync list --template "$tpl" "$name" 2>/dev/null || true; } |
+    while IFS= read -r line; do
+      case $line in
+        "c "*) echo "offload: conflict at $root/${line#c }, changed on both machines;" \
+          "delete the copy you do not want" >&2 ;;
+      esac
+    done
+}
+
+cmd_run() {
+  [ $# -gt 0 ] || usage
+  project
+  reach
+  ensure_session
+  flush || exit 255
+  local tty=-T rc=0
+  # -q drops the "Shared connection to ... closed" line ssh prints after every tty session.
+  if is_tty; then tty=-tq; fi
+  # The remote's own login shell, so its PATH and tools are there.
+  ssh "$tty" "$HOST" "cd $(q "$here") && exec \"\$SHELL\" -l -c $(q "$(qargs "$@")")" || rc=$?
+  if flush; then report_conflicts; elif [ "$rc" = 0 ]; then rc=255; fi
+  exit "$rc"
+}
+
+cmd_detach() {
+  [ $# -ge 2 ] || usage
+  local job=$1 log=$LOGDIR/$1.log
+  shift
+  valid_name "$job"
+  project
+  reach
+  ensure_session
+  flush || exit 255
+  local job_script
+  job_script="$(qargs "$@") >>$(q "$log") 2>&1; echo \"[offload] exit \$?\" >>$(q "$log")"
+  ssh -T "$HOST" "mkdir -p $(q "$LOGDIR") && cd $(q "$here") &&
+    tmux new-session -d -s $(q "$job") \"\$SHELL\" -l -c $(q "$job_script")"
+  echo "offload: started $job on $HOST, log $log (offload logs $job)" >&2
+}
+
+cmd_logs() {
+  [ $# -eq 1 ] || usage
+  valid_name "$1"
+  reach
+  local log
+  log=$(q "$LOGDIR/$1.log")
+  if is_tty; then ssh -tq "$HOST" "tail -n 100 -f $log"; else ssh -T "$HOST" "tail -n 100 $log"; fi
+}
+
+cmd_ls() {
+  reach
+  ssh -T "$HOST" 'tmux ls 2>/dev/null || echo "no tmux sessions"'
+}
+
+cmd_stop() {
+  [ $# -eq 1 ] || usage
+  valid_name "$1"
+  reach
+  # = makes tmux match the name exactly; a bare name also matches any session it prefixes.
+  ssh -T "$HOST" "tmux kill-session -t $(q "=$1")"
+}
+
+cmd_port() {
+  local stop=
+  if [ "${1:-}" = stop ]; then stop=1; shift; fi
+  [ $# -eq 1 ] || usage
+  local port=$1
+  [[ $port =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || die "port must be 1 to 65535"
+  # ControlPath=none: with only ControlMaster=no, ssh hands the forward to the shared master
+  # and exits, so there would be no process of our own to find or stop.
+  local fwd=(ssh -fN -o ControlPath=none -o ControlMaster=no -o ExitOnForwardFailure=yes
+    -L "$port:localhost:$port" "$HOST")
+  local pat="^${fwd[*]}\$" err
+  if [ -n "$stop" ]; then
+    pkill -f "$pat" || die "no offload forward on port $port"
+    echo "offload: closed the forward on port $port" >&2
+    return
+  fi
+  if pgrep -f "$pat" >/dev/null; then
+    echo "offload: localhost:$port already forwards to $HOST" >&2
+    return
+  fi
+  reach
+  if ! err=$("${fwd[@]}" </dev/null 2>&1) && ! pgrep -f "$pat" >/dev/null; then
+    die "could not forward port $port: ${err%%$'\n'*}"
+  fi
+  echo "offload: $HOST localhost:$port now answers on localhost:$port (offload -p stop $port)" >&2
+}
+
+# tmux names cannot hold : or . and session names often have spaces or brackets.
+tmux_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-50; }
+
+# Claude Code runs on the remote inside tmux, so it outlives this terminal and this machine sleeping.
+# Starts tmux session $1 in dir $2 running Claude with args $3; reattaches if it exists.
+launch() {
+  local t=$1 dir=$2 shell
+  shell="\$SHELL -lc $(q "claude $3")"
+  # -u: a non-login ssh has no LANG, and tmux then draws every non-ASCII glyph as "_".
+  if is_tty; then exec ssh -tq "$HOST" "tmux -u new-session -A -s $(q "$t") -c $(q "$dir") $(q "$shell")"; fi
+  ssh -T "$HOST" "tmux has-session -t $(q "=$t") 2>/dev/null || tmux -u new-session -d -s $(q "$t") -c $(q "$dir") $(q "$shell")"
+  echo "offload: Claude Code chat $t is running on $HOST; attach from a terminal with: offload attach $t" >&2
+}
+
+# offload claude [name] [-- claude flags]: flags such as --model or --effort apply to that session only.
+cmd_claude() {
+  local s="" extra="" a
+  if [ $# -ge 1 ] && [ "$1" != "--" ]; then s=$1; shift; fi
+  if [ "${1:-}" = "--" ]; then shift; for a in "$@"; do extra+=" $(q "$a")"; done
+  elif [ $# -gt 0 ]; then usage; fi
+  project
+  s=${s:-$(basename "$root")}
+  reach
+  ensure_session
+  flush || exit 255
+  launch "$(tmux_name "$s")" "$here" "--name $(q "$s")$extra"
+}
+
+cmd_attach() {
+  [ $# -eq 1 ] || usage
+  reach
+  exec ssh -tq "$HOST" "tmux -u attach -t $(q "=$(tmux_name "$1")")"
+}
+
+# Prints: id, cwd, name, pid (0 when not open on this machine), transcript, then the
+# <projects>/<folder> roots the transcript touched, all tab-separated.
+resolve_session() {
+  python3 - "$1" "$PROJECTS" <<'PY'
+import glob, json, os, re, sys
+q, projects = sys.argv[1], sys.argv[2]
+home = os.path.expanduser("~")
+
+def alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+registry = []
+for p in glob.glob(home + "/.claude/sessions/*.json"):
+    try:
+        registry.append(json.load(open(p)))
+    except Exception:
+        pass
+
+def tail(path, size=4_000_000):
+    with open(path, "rb") as fh:
+        fh.seek(0, 2)
+        n = fh.tell()
+        fh.seek(max(0, n - size))
+        return fh.read().decode("utf-8", "ignore").splitlines()[1 if n > size else 0:]
+
+files = sorted(glob.glob(home + "/.claude/projects/*/*.jsonl"), key=os.path.getmtime, reverse=True)
+by_id = {os.path.basename(f)[:-6]: f for f in files}
+sid = q if q in by_id else None
+if not sid:
+    named = [e for e in registry if e.get("name") == q and e.get("sessionId") in by_id]
+    if named:
+        sid = max(named, key=lambda e: os.path.getmtime(by_id[e["sessionId"]]))["sessionId"]
+if not sid:
+    for f in files[:1500]:
+        if any('"customTitle":' + json.dumps(q) in line for line in tail(f, 600_000)):
+            sid = os.path.basename(f)[:-6]
+            break
+if not sid:
+    sys.exit(f"offload: no session named or with id {q!r} in the last 1500 transcripts")
+
+path = by_id[sid]
+name = cwd = None
+roots = set()
+pat = re.compile(re.escape(projects) + r"/([^/\"\\]+)")
+for line in tail(path):
+    try:
+        e = json.loads(line)
+    except Exception:
+        continue
+    if e.get("type") == "custom-title" and e.get("customTitle"):
+        name = e["customTitle"]
+    if e.get("cwd"):
+        cwd = e["cwd"]
+    if e.get("type") == "assistant":
+        for m in pat.finditer(json.dumps(e.get("message", {}).get("content", ""))):
+            d = os.path.join(projects, m.group(1))
+            if os.path.isdir(d) and not m.group(1).startswith("."):
+                roots.add(d)
+pid = next((e.get("pid") for e in registry if e.get("sessionId") == sid and alive(e.get("pid", 0))), 0)
+print("\t".join([sid, cwd or "", name or sid[:8], str(pid), path] + sorted(roots)))
+PY
+}
+
+# Moves a local chat to the remote with its name and history: syncs the folders it worked in,
+# copies its transcript, and resumes it there. A session open on two machines forks its transcript.
+cmd_move() {
+  [ $# -eq 1 ] || usage
+  local info id cwd name pid tp sub
+  info=$(resolve_session "$1") || exit 1
+  IFS=$'\t' read -r id cwd name pid tp roots <<<"$info"
+  [ "$pid" = 0 ] || die "$name is still open here (pid $pid). Exit it (/exit), then run offload move again"
+  [ -d "$cwd" ] || die "its folder $cwd is not on this machine"
+  reach
+  echo "offload: moving $name ($id) from $cwd" >&2
+  for sub in $(printf '%s' "$roots" | tr '\t' '\n') ; do
+    [ "$sub" = "$cwd" ] && continue
+    ( cd "$sub" && project && ensure_session && flush ) && echo "offload: synced $sub" >&2 ||
+      echo "offload: skipped $sub (see above); the chat will not see its files on $HOST" >&2
+  done
+  if [ "$cwd" != "$PROJECTS" ]; then ( cd "$cwd" && project && ensure_session && flush ) || exit 1; fi
+  local pdir t remote_m local_m; pdir=$(dirname "$tp"); t=$(tmux_name "$name")
+  # A second chat with this tmux name would make launch skip silently, and a reply would type into it.
+  ssh "$HOST" "tmux has-session -t $(q "=$t") 2>/dev/null" &&
+    die "a chat named $t is already running on $HOST; rename one of them first (/rename)"
+  ssh "$HOST" "mkdir -p $(q "$pdir") $(q "$cwd")"
+  # Never overwrite a newer remote copy: a chat that last ran there is ahead of the local
+  # copy until transcripts are synced back. Copying over it would truncate the transcript.
+  remote_m=$(ssh "$HOST" "stat -c %Y $(q "$tp") 2>/dev/null || echo 0")
+  local_m=$(stat -f %m "$tp")
+  if [ "${remote_m:-0}" -gt "$local_m" ]; then
+    echo "offload: $HOST's copy of $id is newer; resuming that one" >&2
+  else
+    scp -pq "$tp" "$HOST:$pdir/"
+    [ -d "$pdir/$id" ] && scp -prq "$pdir/$id" "$HOST:$pdir/"
+  fi
+  launch "$t" "$cwd" "--resume $(q "$id")"
+}
+
+cmd_status() {
+  mutagen sync list --label-selector offload --template '{{range .}}{{.Name}}{{"\t"}}{{if .Paused}}Paused{{else}}{{.Status}}{{end}}{{"\t"}}conflicts={{len .Conflicts}}{{"\t"}}{{.Alpha.Path}}{{if .LastError}}{{"\t"}}error: {{.LastError}}{{end}}{{"\n"}}{{end}}'
+}
+
+case ${1:-} in
+  '' | -h | --help) usage ;;
+  status) cmd_status ;;
+  claude) shift; cmd_claude "$@" ;;
+  move) shift; cmd_move "$@" ;;
+  attach) shift; cmd_attach "$@" ;;
+  ls) cmd_ls ;;
+  logs) shift; cmd_logs "$@" ;;
+  stop) shift; cmd_stop "$@" ;;
+  -d) shift; cmd_detach "$@" ;;
+  -p) shift; cmd_port "$@" ;;
+  --) shift; cmd_run "$@" ;;
+  *) cmd_run "$@" ;;
+esac
