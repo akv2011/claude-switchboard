@@ -5,7 +5,9 @@ This repository is the generalized, public form of a private working copy. Chang
 ## Steps
 
 1. Take the change as a diff of the private commit: `git -C <private> show <commit> -- src test`.
-2. Apply it by hand. Rename on the way:
+2. Apply it by hand. Rename on the way (the private copy keeps its original names):
+   - the product: "Claude Session Restore" is "Claude Switchboard"; `claude-session-restore` is `claude-switchboard`; the state folder `~/.claude-restore` is `~/.claude-switchboard`; the CLI `csr` is `switchboard`; the bridge `csr-bridge` is `switchboard-bridge` (publisher `switchboard`);
+   - the private machine CLI is `tools/offload/offload` here, and its sync job is `tools/offload/claude-sync`;
    - the second machine is `remote` (config `remote.label` for display), never a machine name;
    - the private machine CLI's moves, attaches and starts are `src/core/remote.js` functions;
    - personal notifiers become `notifyArgs()` in `src/recorder/daemon.js`;

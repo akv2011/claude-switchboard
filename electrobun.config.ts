@@ -1,7 +1,7 @@
 export default {
   app: {
-    name: 'Claude Session Restore',
-    identifier: 'io.github.claude-session-restore',
+    name: 'Claude Switchboard',
+    identifier: 'io.github.claude-switchboard',
     version: '1.0.0',
     description: 'Restore your Claude Code sessions after a shutdown, and manage every chat.',
   },

@@ -1,6 +1,6 @@
 # Configuration
 
-One optional file: `~/.config/claude-session-restore/config.json`. It is read on every refresh, so an edit takes effect within 15 seconds. A missing file means the defaults. A broken file is reported in the window and the defaults are used.
+One optional file: `~/.config/claude-switchboard/config.json`. It is read on every refresh, so an edit takes effect within 15 seconds. A missing file means the defaults. A broken file is reported in the window and the defaults are used.
 
 ```json
 {
@@ -54,7 +54,7 @@ How the recorder tells you about usage limits and automatic moves. Default: a ma
 
 ## Files the app keeps
 
-All under `~/.claude-restore/`:
+All under `~/.claude-switchboard/`:
 
 | File | What |
 |---|---|

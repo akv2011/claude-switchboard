@@ -94,7 +94,7 @@ test('enabling flips an existing "off" in place', () => {
 test('a backup is written before any change', () => {
   const file = writeSettings('{\n  "editor.fontSize": 13\n}');
   const result = enableAutoTasks();
-  assert.ok(fs.existsSync(`${file}.csr-backup`), 'no backup written');
+  assert.ok(fs.existsSync(`${file}.switchboard-backup`), 'no backup written');
   assert.match(fs.readFileSync(result.backup, 'utf8'), /"editor\.fontSize": 13/);
   assert.ok(!fs.readFileSync(result.backup, 'utf8').includes('allowAutomaticTasks'));
 });

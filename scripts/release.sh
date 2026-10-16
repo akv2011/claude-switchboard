@@ -8,10 +8,10 @@ echo "release $version"
 
 npm test
 bun run gui
-(cd vscode-bridge && bunx --bun @vscode/vsce@3 package --no-dependencies --skip-license --allow-missing-repository -o "../dist/csr-bridge-$version.vsix")
+(cd vscode-bridge && bunx --bun @vscode/vsce@3 package --no-dependencies --skip-license --allow-missing-repository -o "../dist/switchboard-bridge-$version.vsix")
 
 mkdir -p dist
-app="build/stable-macos-arm64/Claude Session Restore.app"
+app="build/stable-macos-arm64/Claude Switchboard.app"
 [ -d "$app" ] || { echo "release: no build at $app" >&2; exit 1; }
 ditto -c -k --keepParent "$app" "dist/Claude-Session-Restore-$version-macos-arm64.zip"
 (cd dist && shasum -a 256 ./*"$version"* > SHA256SUMS && cat SHA256SUMS)

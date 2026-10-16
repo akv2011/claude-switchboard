@@ -13,19 +13,19 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { stateDir } from '../core/paths.js';
 
-export const LABEL = 'dev.csr.claude-session-restore';
+export const LABEL = 'io.github.claude-switchboard.recorder';
 
 const AGENTS_DIR = path.join(os.homedir(), 'Library', 'LaunchAgents');
 export const PLIST_PATH = path.join(AGENTS_DIR, `${LABEL}.plist`);
 
 /**
  * Where launchd runs the recorder from: the copy scripts/install.sh makes in
- * ~/.claude-restore/recorder, so an edit in the source tree reaches it only
+ * ~/.claude-switchboard/recorder, so an edit in the source tree reaches it only
  * at install. Running the source tree itself put every half-made edit live on
  * the next 30 s tick. From inside the built app this file's own URL points
  * into the bundle, where no daemon.js exists.
  */
-export const snapshotEntry = () => path.join(os.homedir(), '.claude-restore', 'recorder', 'src', 'recorder', 'daemon.js');
+export const snapshotEntry = () => path.join(os.homedir(), '.claude-switchboard', 'recorder', 'src', 'recorder', 'daemon.js');
 
 function daemonEntry() {
   return fs.existsSync(snapshotEntry()) ? snapshotEntry() : fileURLToPath(new URL('./daemon.js', import.meta.url));

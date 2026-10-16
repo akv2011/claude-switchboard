@@ -15,7 +15,7 @@ It does not call any model, read any API key, or contact any server.
 
 - **config.json** reaches ssh, rsync and tmux. The host must look like an ssh alias and never start with `-`; remote paths may contain plain path characters only, because older rsync builds pass remote paths to the remote shell unquoted.
 - **Window requests**: model, effort and permission must be in fixed lists; replies are 1 to 4000 characters; account numbers must be ones cswap lists; folders must exist. Everything else is refused before a process is touched.
-- **Bridge files** under `~/.claude-restore/vscode` are written by the app and read by the extension. Any process running as you can write there too; the extension types only into a terminal whose shell pid matches a request, and stale requests expire.
+- **Bridge files** under `~/.claude-switchboard/vscode` are written by the app and read by the extension. Any process running as you can write there too; the extension types only into a terminal whose shell pid matches a request, and stale requests expire.
 - **Transcripts** are rendered as text: the markdown renderer escapes everything first and never creates links.
 
 ## Reporting

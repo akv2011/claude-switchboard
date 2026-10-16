@@ -37,7 +37,7 @@ test('a cached name is reused rather than read again', () => {
   // The mtime is restored from the cache's own record rather than from a stat
   // taken here: utimesSync cannot reproduce the sub-millisecond precision that
   // APFS records, so a naive round trip misses the key by a fraction of a ms.
-  const cachePath = path.join(fakeHome, '.claude-restore', 'scan-cache.json');
+  const cachePath = path.join(fakeHome, '.claude-switchboard', 'scan-cache.json');
   const { mtimeMs, size } = JSON.parse(fs.readFileSync(cachePath, 'utf8')).entries[SID];
 
   const swapped = `${line('XXXXX prompt here')}\n`;
@@ -56,7 +56,7 @@ test('a real edit invalidates the cached name', () => {
 
 test('a cache written by an older version is ignored, not trusted', async () => {
   const { readScanCache } = await import('../src/core/scan-cache.js');
-  const cachePath = path.join(fakeHome, '.claude-restore', 'scan-cache.json');
+  const cachePath = path.join(fakeHome, '.claude-switchboard', 'scan-cache.json');
   fs.writeFileSync(cachePath, JSON.stringify({
     version: 0,
     entries: { [SID]: { size: 1, mtimeMs: 1, name: 'from an old version', cwd: null } },
@@ -65,7 +65,7 @@ test('a cache written by an older version is ignored, not trusted', async () => 
 });
 
 test('an unreadable cache never fails a scan', () => {
-  fs.writeFileSync(path.join(fakeHome, '.claude-restore', 'scan-cache.json'), 'not json{{');
+  fs.writeFileSync(path.join(fakeHome, '.claude-switchboard', 'scan-cache.json'), 'not json{{');
   assert.doesNotThrow(() => scanSessions());
   assert.equal(nameOf(), 'a completely different first prompt');
 });

@@ -124,7 +124,7 @@ export function enableAutoTasks() {
     return { changed: true, reason: 'created settings.json', file, backup: null };
   }
 
-  const backup = `${file}.csr-backup`;
+  const backup = `${file}.switchboard-backup`;
   fs.writeFileSync(backup, raw, 'utf8');
 
   let next;
@@ -187,7 +187,7 @@ export function setUserSetting(key, value) {
     return { changed: true, reason: 'created settings.json', file, backup: null };
   }
 
-  const backup = `${file}.csr-backup`;
+  const backup = `${file}.switchboard-backup`;
   fs.writeFileSync(backup, raw, 'utf8');
 
   let next;
@@ -237,7 +237,7 @@ export function setBooleanSetting(key, value) {
     return { changed: true, reason: 'created settings.json', file, backup: null };
   }
 
-  const backup = `${file}.csr-backup`;
+  const backup = `${file}.switchboard-backup`;
   fs.writeFileSync(backup, raw, 'utf8');
 
   let next;

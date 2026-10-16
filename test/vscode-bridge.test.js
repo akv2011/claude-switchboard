@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runInVscodeTerminal, shq } from '../src/core/vscode-bridge.js';
 
-const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'csr-bridge-'));
+const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-bridge-'));
 
 /** Plays one VSCode window: answers the first request it sees. */
 function fakeWindow(root, reply) {
