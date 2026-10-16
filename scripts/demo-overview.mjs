@@ -107,7 +107,7 @@ const overview = {
     projects: projects.length, sessions: sessions.length, bytes: sessions.reduce((n, s) => n + s.bytes, 0),
     live: sessions.filter((s) => s.live).length, liveMac: sessions.filter((s) => s.machine === 'mac').length,
     liveRemote: sessions.filter((s) => s.machine === 'remote').length, needsYou: sessions.filter((s) => s.needsYou).length,
-    skipped: 0, sdkHidden: 312,
+    skipped: 0, sdkHidden: 187,
   },
   restore: {
     count: 2, capturedAt: min(180), source: 'snapshot', remoteCount: 0,
@@ -116,9 +116,10 @@ const overview = {
       { sessionId: id(), name: 'store_listing', cwd: P('mobile-app'), machine: 'mac' },
     ] }],
   },
+  // Machine sizes are invented too, not any real Mac or remote.
   mac: {
-    totalMb: 24576, usedMb: 21120, swapTotalMb: 8192, swapUsedMb: 7370, pressure: 'warn', load1: 9.1, cores: 12, tempC: null,
-    diskFreeMb: 184_000, swapDynamic: true, swapInMbPerMin: 34, swapOutMbPerMin: 12,
+    totalMb: 36864, usedMb: 31700, swapTotalMb: 8192, swapUsedMb: 7370, pressure: 'warn', load1: 9.1, cores: 14, tempC: null,
+    diskFreeMb: 241_000, swapDynamic: true, swapInMbPerMin: 34, swapOutMbPerMin: 12,
     health: health('strained', ['memory pressure warning', '86% memory used', 'swapping in 34 MB/min'], 86),
   },
   autoBalance: { enabled: false, idleMin: 20, last: null },
@@ -135,8 +136,8 @@ const overview = {
   ],
   remote: {
     configured: true, label: 'Devbox', localProjectsRoot: root, reachable: true, stale: false, checkedAt: now, lastReachableAt: now,
-    memTotalMb: 15209, memAvailableMb: 11850, liveCount: 3, error: null,
-    load: { totalMb: 15209, usedMb: 3359, swapTotalMb: 32768, swapUsedMb: 0, swapOutMbPerMin: 0, swapInMbPerMin: 0, psiMem60: 0, pressure: null, load1: 1.4, cores: 16, tempC: 58 },
+    memTotalMb: 64000, memAvailableMb: 49900, liveCount: 3, error: null,
+    load: { totalMb: 64000, usedMb: 14100, swapTotalMb: 8192, swapUsedMb: 0, swapOutMbPerMin: 0, swapInMbPerMin: 0, psiMem60: 0, pressure: null, load1: 1.4, cores: 24, tempC: 51 },
     health: health('ok', [], 22),
   },
   configErrors: [],
