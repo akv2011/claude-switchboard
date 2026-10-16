@@ -56,7 +56,7 @@ test('a snapshot round-trips', () => {
 
 
 test('no snapshot at all means nothing to restore, never an error', () => {
-  fs.rmSync(path.join(fakeHome, '.claude-restore'), { recursive: true, force: true });
+  fs.rmSync(path.join(fakeHome, '.claude-switchboard'), { recursive: true, force: true });
   assert.equal(readSnapshot(), null);
   const { sessions, source } = restorableSessions();
   assert.deepEqual(sessions, []);
@@ -64,7 +64,7 @@ test('no snapshot at all means nothing to restore, never an error', () => {
 });
 
 test('a corrupt snapshot degrades to nothing rather than throwing', () => {
-  const dir = path.join(fakeHome, '.claude-restore');
+  const dir = path.join(fakeHome, '.claude-switchboard');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'state.json'), '{ this is not json');
   assert.equal(readSnapshot(), null);
@@ -72,7 +72,7 @@ test('a corrupt snapshot degrades to nothing rather than throwing', () => {
 });
 
 test('a snapshot from a future schema is ignored rather than misread', () => {
-  const dir = path.join(fakeHome, '.claude-restore');
+  const dir = path.join(fakeHome, '.claude-switchboard');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ schemaVersion: 99, sessions: nine }));
   assert.equal(readSnapshot(), null);
@@ -162,13 +162,13 @@ test('reading the overview takes a fresh reading, so a closed chat shows at once
   // paths.js resolves HOME once at import, so this reuses the fixture home
   // rather than pointing at a new one, which would silently do nothing.
   const api = await import('../src/core/api.js');
-  fs.rmSync(path.join(fakeHome, '.claude-restore'), { recursive: true, force: true });
+  fs.rmSync(path.join(fakeHome, '.claude-switchboard'), { recursive: true, force: true });
   assert.equal(readSnapshot(), null, 'nothing stored to begin with');
 
   api.getOverview();
   assert.ok(readSnapshot(), 'the overview must record a reading itself');
 
-  fs.rmSync(path.join(fakeHome, '.claude-restore'), { recursive: true, force: true });
+  fs.rmSync(path.join(fakeHome, '.claude-switchboard'), { recursive: true, force: true });
   api.getOverview({ poll: false });
   assert.equal(readSnapshot(), null, 'poll:false must leave the store untouched');
 });
@@ -286,7 +286,7 @@ test('an offer does not expire while it sits unused', () => {
 });
 
 test('a v1 snapshot is migrated rather than discarded', () => {
-  const dir = path.join(fakeHome, '.claude-restore');
+  const dir = path.join(fakeHome, '.claude-switchboard');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
     schemaVersion: 1,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * csr: the terminal face of claude-session-restore.
+ * switchboard: the terminal face of claude-switchboard.
  *
  * Everything here is a thin wrapper over src/core/api.js, so the CLI and the GUI
  * can never drift apart in behaviour.
@@ -57,7 +57,7 @@ function cmdList(args) {
   const t = overview.totals;
   console.log(`\n${DIM}${t.sessions} chats across ${t.projects} projects, ${mb(t.bytes)} total, ${t.live} running${RESET}`);
   if (!overview.recorder.armed) {
-    console.log(`${YELLOW}recorder is not running: restore will not work. run: csr daemon install${RESET}`);
+    console.log(`${YELLOW}recorder is not running: restore will not work. run: switchboard daemon install${RESET}`);
   }
 }
 
@@ -85,7 +85,7 @@ function findSession(idPrefix) {
 
 function cmdDelete(args) {
   const idPrefix = args.find((a) => !a.startsWith('-'));
-  if (!idPrefix) throw new Error('usage: csr delete <session-id-prefix|name> [--yes]');
+  if (!idPrefix) throw new Error('usage: switchboard delete <session-id-prefix|name> [--yes]');
 
   const session = findSession(idPrefix);
   const plan = previewDelete(session);
@@ -141,11 +141,11 @@ async function cmdRestore(args) {
     console.log(`${DIM}VSCode will spawn the terminals when the folder opens.${RESET}`);
   } else {
     console.log(`${YELLOW}tasks written, but VSCode will NOT run them.${RESET}`);
-    console.log(`${DIM}task.allowAutomaticTasks is application-scoped, so it only counts in user settings. run: csr autotasks${RESET}`);
+    console.log(`${DIM}task.allowAutomaticTasks is application-scoped, so it only counts in user settings. run: switchboard autotasks${RESET}`);
   }
   console.log(`${DIM}the folder must also be trusted, or VSCode blocks automatic tasks silently.${RESET}`);
   if (readPersistentSessions().effective) {
-    console.log(`${YELLOW}heads up: VSCode terminal revival is on, so you will also get empty shells beside these. run: csr persistence off${RESET}`);
+    console.log(`${YELLOW}heads up: VSCode terminal revival is on, so you will also get empty shells beside these. run: switchboard persistence off${RESET}`);
   }
 }
 
@@ -198,8 +198,8 @@ function cmdLayout(args) {
   if (!wanted) {
     const current = readTerminalLocation();
     console.log(`terminal location: ${BOLD}${current.effective}${RESET}`);
-    console.log(`${DIM}csr layout view    restored terminals in the bottom panel${RESET}`);
-    console.log(`${DIM}csr layout editor  restored terminals as editor tabs${RESET}`);
+    console.log(`${DIM}switchboard layout view    restored terminals in the bottom panel${RESET}`);
+    console.log(`${DIM}switchboard layout editor  restored terminals as editor tabs${RESET}`);
     console.log(`${DIM}VSCode has no per-task option for this (microsoft/vscode#212070), it is one global setting.${RESET}`);
     return;
   }
@@ -217,12 +217,12 @@ function cmdPersistence(args) {
     if (current.effective) {
       console.log(`${YELLOW}while this is on you get duplicates after a restore.${RESET}`);
       console.log(`${DIM}VSCode revives your old terminals as empty shells (the chat that was running in them is gone) and restore spawns fresh ones alongside.${RESET}`);
-      console.log(`${DIM}csr persistence off   leave restore as the only thing reopening terminals${RESET}`);
+      console.log(`${DIM}switchboard persistence off   leave restore as the only thing reopening terminals${RESET}`);
     }
     return;
   }
   const enabled = wanted === 'on';
-  if (!['on', 'off'].includes(wanted)) throw new Error('usage: csr persistence <on|off>');
+  if (!['on', 'off'].includes(wanted)) throw new Error('usage: switchboard persistence <on|off>');
   const result = setPersistentSessions(enabled);
   if (!result.changed) return console.log(`${YELLOW}no change: ${result.reason}${RESET}`);
   console.log(`${GREEN}VSCode terminal revival ${enabled ? 'on' : 'off'} (${result.reason})${RESET}`);
@@ -236,17 +236,17 @@ function cmdClear(args) {
 }
 
 const HELP = `
-${BOLD}csr${RESET} - claude session restore
+${BOLD}switchboard${RESET} - claude switchboard
 
-  ${BOLD}csr list${RESET} [filter]        every chat, grouped by project
-  ${BOLD}csr live${RESET}                 chats running right now
-  ${BOLD}csr restore${RESET} [--yes]      bring back what was open before shutdown
-  ${BOLD}csr delete${RESET} <id|name> [--yes]   delete a chat and everything keyed to it
-  ${BOLD}csr clear${RESET} [folder]       remove generated tasks from a folder
-  ${BOLD}csr autotasks${RESET}            let VSCode auto-run restored terminals
-  ${BOLD}csr layout${RESET} [view|editor]  where restored terminals open
-  ${BOLD}csr persistence${RESET} [on|off]  VSCode's own terminal revival (off avoids duplicates)
-  ${BOLD}csr daemon${RESET} <install|uninstall|status|poll>
+  ${BOLD}switchboard list${RESET} [filter]        every chat, grouped by project
+  ${BOLD}switchboard live${RESET}                 chats running right now
+  ${BOLD}switchboard restore${RESET} [--yes]      bring back what was open before shutdown
+  ${BOLD}switchboard delete${RESET} <id|name> [--yes]   delete a chat and everything keyed to it
+  ${BOLD}switchboard clear${RESET} [folder]       remove generated tasks from a folder
+  ${BOLD}switchboard autotasks${RESET}            let VSCode auto-run restored terminals
+  ${BOLD}switchboard layout${RESET} [view|editor]  where restored terminals open
+  ${BOLD}switchboard persistence${RESET} [on|off]  VSCode's own terminal revival (off avoids duplicates)
+  ${BOLD}switchboard daemon${RESET} <install|uninstall|status|poll>
 
 ${DIM}delete and restore are dry runs until you pass --yes.${RESET}
 `;

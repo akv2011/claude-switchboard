@@ -157,7 +157,7 @@ export function usageAlerts({ accounts = readUsage(), notify = defaultNotify, fi
  */
 export function notifyArgs(message, command = readConfig().notify.command) {
   if (command) return [command[0], [...command.slice(1), message]];
-  return ['/usr/bin/osascript', ['-e', 'on run argv', '-e', 'display notification (item 1 of argv) with title "Claude Session Restore"', '-e', 'end run', message]];
+  return ['/usr/bin/osascript', ['-e', 'on run argv', '-e', 'display notification (item 1 of argv) with title "Claude Switchboard"', '-e', 'end run', message]];
 }
 
 const defaultNotify = (message) => {

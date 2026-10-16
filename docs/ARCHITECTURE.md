@@ -12,13 +12,13 @@ Three processes and one extension:
  └───────────────────────────┘RPC└──────┬──────────┘   └──────┬─────────────┘
                                         │ both call src/core  │ every 30 s
                                         ▼                     ▼
-                          ~/.claude-restore (cache, snapshot, bridge requests)
+                          ~/.claude-switchboard (cache, snapshot, bridge requests)
                                         │
                                         ▼
                    VS Code bridge extension (vscode-bridge/), one per window
 ```
 
-- **src/core**: all logic, plain Node-compatible ESM with no dependencies, so the window, the CLI (`bin/csr.js`) and the recorder share one implementation.
+- **src/core**: all logic, plain Node-compatible ESM with no dependencies, so the window, the CLI (`bin/switchboard.js`) and the recorder share one implementation.
 - **src/bun/index.ts**: the main process. It is thin: each RPC forwards to `src/core/api.js`.
 - **src/mainview**: the window. Vanilla TypeScript, one stylesheet, bundled Geist fonts. Rows are keyed and updated in place, so a 15-second refresh never re-animates the list.
 - **src/recorder**: a launchd job (`--once` every 30 s) that snapshots what is open, sends usage notifications, and runs auto-balance when it is switched on.
@@ -56,7 +56,7 @@ Every value from the window is checked at the boundary in `api.js`, `restart.js`
 
 ## The VS Code bridge
 
-VS Code has no command-line way to type into a terminal, so the app and the extension talk through files under `~/.claude-restore/vscode/`:
+VS Code has no command-line way to type into a terminal, so the app and the extension talk through files under `~/.claude-switchboard/vscode/`:
 
 - `requests/<id>.json`: `{ shellPid?, cwd, name, text, at }`. The window holding the terminal whose shell pid matches takes it and types `text` there. With no such terminal (or a closed one), the window opened on `cwd` takes it after 1.5 s, or a parent folder's window after 3 s, and opens a new terminal. The app opens the folder in VS Code after 4.5 s if nobody took it.
 - `keys/<id>.json`: `{ shellPid, text, newline, at }`. Keystrokes for a running chat: only the terminal with that shell pid, never a new one, with or without Enter (Esc and Ctrl+U go alone). Expires after 30 s.

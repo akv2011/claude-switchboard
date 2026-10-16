@@ -2,7 +2,7 @@
  * The remote machine: an optional second computer, reached over ssh, where
  * chats run inside tmux.
  *
- * Configured in ~/.config/claude-session-restore/config.json (see config.js).
+ * Configured in ~/.config/claude-switchboard/config.json (see config.js).
  * With no remote configured, every function here returns "not configured"
  * without starting ssh.
  *

@@ -116,7 +116,7 @@ const rpc = BrowserView.defineRPC({
 });
 
 new BrowserWindow({
-  title: 'Claude Session Restore',
+  title: 'Claude Switchboard',
   url: 'views://mainview/index.html',
   frame: { x: 120, y: 100, width: 1080, height: 720 },
   rpc,

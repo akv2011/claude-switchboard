@@ -1,5 +1,5 @@
 /**
- * Lets Claude Session Restore type a command into a VSCode terminal.
+ * Lets Claude Switchboard type a command into a VSCode terminal.
  *
  * The app drops a request file; every VSCode window watches the folder. The
  * window that owns the terminal whose shell pid matches takes it and types into
@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ROOT = path.join(os.homedir(), '.claude-restore', 'vscode');
+const ROOT = path.join(os.homedir(), '.claude-switchboard', 'vscode');
 const REQUESTS = path.join(ROOT, 'requests');
 const DONE = path.join(ROOT, 'done');
 // Keystrokes for a chat that is running: only ever its own terminal, never a

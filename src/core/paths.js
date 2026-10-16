@@ -32,7 +32,7 @@ export const HISTORY_FILE = path.join(CLAUDE_DIR, 'history.jsonl');
  * fixed before a test could point HOME at a fixture, so the suite wrote its
  * temporary workspaces into the real store and they showed up as offers.
  */
-export const stateDir = () => path.join(os.homedir(), '.claude-restore');
+export const stateDir = () => path.join(os.homedir(), '.claude-switchboard');
 export const stateFile = () => path.join(stateDir(), 'state.json');
 export const logFile = () => path.join(stateDir(), 'recorder.log');
 

@@ -97,14 +97,14 @@ const offerKey = (scope: string, sessions: Session[]) =>
   `${scope}::${sessions.map((s) => s.sessionId).sort().join(',')}`;
 
 type SortMode = 'recent' | 'name';
-const storedSort = localStorage.getItem('csr.sort');
+const storedSort = localStorage.getItem('switchboard.sort');
 let sortMode: SortMode = storedSort === 'name' ? 'name' : 'recent';
 
 /** Which sidebar groups are open, kept across launches. Storage can be unavailable; then nothing is remembered. */
-const navOpen = new Set<string>((() => { try { return JSON.parse(localStorage.getItem('csr.nav.open') ?? '[]'); } catch { return []; } })());
+const navOpen = new Set<string>((() => { try { return JSON.parse(localStorage.getItem('switchboard.nav.open') ?? '[]'); } catch { return []; } })());
 /** Groups closed by hand; they stay closed even while they hold the current view. */
 const navClosed = new Set<string>();
-const saveNavOpen = () => { try { localStorage.setItem('csr.nav.open', JSON.stringify([...navOpen])); } catch { /* not remembered */ } };
+const saveNavOpen = () => { try { localStorage.setItem('switchboard.nav.open', JSON.stringify([...navOpen])); } catch { /* not remembered */ } };
 /** Same-name groups unfolded in the list, keyed by the primary chat's id. */
 const unfolded = new Set<string>();
 /** Model and effort shared by most listed chats; rows show theirs only when it differs. */
@@ -1639,7 +1639,7 @@ function renderSort() {
 function setSort(mode: SortMode) {
   if (sortMode === mode) return;
   sortMode = mode;
-  localStorage.setItem('csr.sort', mode);
+  localStorage.setItem('switchboard.sort', mode);
   renderSort();
   renderList();
 }

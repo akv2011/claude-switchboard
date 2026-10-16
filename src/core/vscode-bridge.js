@@ -13,14 +13,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { withoutClaudeMarkers, codeBin } from './paths.js';
 
-const ROOT = path.join(os.homedir(), '.claude-restore', 'vscode');
+const ROOT = path.join(os.homedir(), '.claude-switchboard', 'vscode');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const code = (args) => new Promise((resolve) => {
   execFile(codeBin(), args, { env: withoutClaudeMarkers() }, (err) => resolve(!err));
 });
 
 /** The installed folder name starts with publisher.name from vscode-bridge/package.json. */
-export const BRIDGE_ID = 'csr.csr-bridge';
+export const BRIDGE_ID = 'switchboard.switchboard-bridge';
 
 /** Whether the extension in vscode-bridge/ is installed (`npm run bridge`). */
 export function bridgeInstalled(dir = path.join(os.homedir(), '.vscode', 'extensions')) {

@@ -1,16 +1,16 @@
 {
-  "name": "claude-session-restore",
+  "name": "claude-switchboard",
   "version": "1.0.0",
-  "description": "A macOS window for every Claude Code chat: see what each is doing, restore them after a shutdown, steer them, and move them to a second machine.",
+  "description": "One window for every Claude Code chat across every machine you own: see what each is doing, steer it, restore it after a shutdown, and share the work with a second computer.",
   "type": "module",
   "bin": {
-    "csr": "./bin/csr.js"
+    "switchboard": "./bin/switchboard.js"
   },
   "scripts": {
     "test": "TZ=Australia/Adelaide node --test test/*.test.js",
     "daemon": "node src/recorder/daemon.js",
     "gui": "electrobun build --env=stable",
-    "bridge": "cd vscode-bridge && bunx --bun @vscode/vsce@3 package --no-dependencies --skip-license --allow-missing-repository -o csr-bridge.vsix && code --install-extension csr-bridge.vsix --force",
+    "bridge": "cd vscode-bridge && bunx --bun @vscode/vsce@3 package --no-dependencies --skip-license --allow-missing-repository -o switchboard-bridge.vsix && code --install-extension switchboard-bridge.vsix --force",
     "install-app": "bun run gui && scripts/install.sh"
   },
   "engines": {

@@ -1,5 +1,5 @@
 /**
- * The user's settings, from ~/.config/claude-session-restore/config.json.
+ * The user's settings, from ~/.config/claude-switchboard/config.json.
  *
  * Everything here is optional. With no file at all the app runs on this Mac
  * only: no remote machine, nothing tries ssh, and the folder-of-projects rule
@@ -27,7 +27,7 @@ export const DEFAULT_PROJECTS_ROOTS = ['~/Projects', '~/Desktop/Projects', '~/co
 export const DEFAULT_REMOTE_ROOT = '~/Projects';
 export const DEFAULT_LABEL = 'Remote';
 
-export const configFile = () => path.join(os.homedir(), '.config', 'claude-session-restore', 'config.json');
+export const configFile = () => path.join(os.homedir(), '.config', 'claude-switchboard', 'config.json');
 
 /** An ssh host or alias. Never starts with "-", so ssh cannot read it as an option. */
 const HOST_RE = /^[A-Za-z0-9_][A-Za-z0-9._@-]{0,252}$/;
