@@ -12,7 +12,9 @@ bun run gui       # build the app
 
 ## Checking UI changes without the app
 
-The window runs in a plain browser when `window.__csrMock` holds an overview, and `__csrMock.__rpc` can hold canned replies for other requests. Build, take `views/mainview/index.js` and `styles.css` from the built bundle, inject the mock into `src/mainview/index.html`, and open it. Use a mock built from invented data if you share screenshots.
+The window runs in a plain browser when `window.__csrMock` holds an overview, and `__csrMock.__rpc` can hold canned replies for other requests. Build, take `views/mainview/index.js` and `styles.css` from the built bundle, inject the mock into `src/mainview/index.html`, and open it.
+
+`node scripts/demo-overview.mjs > demo.json` prints an invented overview with canned replies, the one the README screenshots use. Take shared screenshots from it, never from your own chats, and set the browser's time zone to UTC, since the window shows clock times in local time.
 
 ## Guidelines
 

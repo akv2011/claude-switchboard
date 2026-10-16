@@ -408,7 +408,7 @@ h1, h2 { font-weight: 500; }
   --row-bg: var(--surface);
   position: relative;
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) 112px 124px 66px 40px;
+  grid-template-columns: 14px minmax(0, 1fr) 128px 124px 66px 40px;
   gap: 12px;
   align-items: center;
   height: var(--row-h);
@@ -430,11 +430,11 @@ h1, h2 { font-weight: 500; }
 /* A narrow list (detail panel open, or a small window) keeps the name readable:
    the stats drop out first, since the panel carries them. */
 @container (max-width: 700px) {
-  .row { grid-template-columns: 14px minmax(0, 1fr) 112px 66px 40px; }
+  .row { grid-template-columns: 14px minmax(0, 1fr) 128px 66px 40px; }
   .row > .stats { display: none; }
 }
 @container (max-width: 470px) {
-  .row { grid-template-columns: 14px minmax(0, 1fr) 112px 40px; }
+  .row { grid-template-columns: 14px minmax(0, 1fr) 128px 40px; }
   .row > .num-mem { display: none; }
 }
 .row.is-new { animation: rise 240ms var(--ease) both; }
@@ -806,7 +806,9 @@ h1, h2 { font-weight: 500; }
 /* ---------- new chat ---------- */
 
 .nc { width: min(560px, calc(100vw - 32px)); }
-.nc-body { display: flex; flex-direction: column; gap: 12px; }
+.nc-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 18px; }
+/* Prose here, unlike the session id the other sheet shows in this slot. */
+.nc .sheet-sub { font-family: inherit; font-size: 12.5px; }
 .nc-field { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 12px; font-size: 12.5px; color: var(--text-3); }
 .nc-field[hidden] { display: none; }
 .nav-warn { color: var(--amber); }
