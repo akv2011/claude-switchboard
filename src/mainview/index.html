@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#000000" />
+  <title>Session Restore</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand" translate="no">
+      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="2.75" y="7.75" width="12.5" height="9.5" rx="2.25" stroke="currentColor" stroke-opacity="0.42" stroke-width="1.5"/>
+        <rect x="8" y="3.5" width="13.25" height="10.25" rx="2.25" fill="currentColor"/>
+        <circle cx="11.4" cy="8.6" r="1.2" fill="#0a0a0a"/>
+        <circle cx="14.9" cy="8.6" r="1.2" fill="#0a0a0a"/>
+        <circle cx="18.4" cy="8.6" r="1.2" fill="#52a8ff"/>
+      </svg>
+      <span class="brand-name">Session Restore</span>
+    </div>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Sections" hidden>
+      <button class="tab" id="tab-chats" role="tab" type="button" aria-selected="true" aria-controls="shell">Chats</button>
+      <button class="tab" id="tab-accounts" role="tab" type="button" aria-selected="false" aria-controls="accounts-page">Accounts</button>
+    </nav>
+    <div class="top-right">
+      <button class="acct-pill" id="acct-pill" type="button" hidden></button>
+      <div class="recorder" id="recorder" data-state="unknown">
+        <span class="recorder-dot" aria-hidden="true"></span>
+        <span id="recorder-label">Checking recorder…</span>
+        <button class="recorder-action" id="recorder-action" type="button" hidden>Arm</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell" id="shell" role="tabpanel" aria-labelledby="tab-chats">
+    <nav class="nav" aria-label="Views and projects">
+      <div class="nav-scroll">
+        <section class="nav-group">
+          <h2 class="nav-title">Views</h2>
+          <div id="views"></div>
+        </section>
+        <section class="nav-group">
+          <h2 class="nav-title">Projects</h2>
+          <div id="projects"></div>
+        </section>
+      </div>
+      <footer class="nav-foot" id="nav-foot"></footer>
+    </nav>
+
+    <section class="content">
+      <div class="machines" id="machines"></div>
+      <div id="offer"></div>
+      <div class="content-head">
+        <div class="content-head-left">
+          <h1 class="title" id="title">All chats</h1>
+          <div class="meta" id="meta"></div>
+        </div>
+        <div class="content-head-right">
+          <label class="search-wrap"><span class="sr-only">Search chats</span>
+            <input class="search" id="search" type="search" placeholder="Search, Enter for inside chats" autocomplete="off" spellcheck="false" />
+          </label>
+          <button class="btn btn-primary" id="new-chat" type="button">New chat</button>
+          <div class="sort" role="group" aria-label="Sort chats">
+            <button class="sort-btn" id="sort-recent" type="button" aria-pressed="true">Recent</button>
+            <button class="sort-btn" id="sort-name" type="button" aria-pressed="false">Name</button>
+          </div>
+        </div>
+      </div>
+      <div class="batch" id="batch" hidden></div>
+      <div class="main">
+        <div class="list" id="rows" aria-busy="true"></div>
+        <aside class="detail" id="detail" hidden aria-label="Chat details"></aside>
+      </div>
+    </section>
+  </main>
+
+  <section class="accounts-page" id="accounts-page" role="tabpanel" aria-labelledby="tab-accounts" hidden>
+    <div class="ap-inner">
+      <header class="ap-head">
+        <div>
+          <h1 class="title">Accounts</h1>
+          <p class="ap-sub" id="ap-sub"></p>
+        </div>
+        <button class="btn" id="ap-refresh" type="button">Refresh</button>
+      </header>
+      <p class="ap-note">Switching moves every chat on this Mac to that account within about 30 seconds, and new chats start on it. A remote machine keeps its own login. You get a notification at 85% of a 5-hour window or 80% of a week; nothing switches on its own.</p>
+      <div class="ap-grid" id="ap-grid"></div>
+    </div>
+  </section>
+
+  <div class="sheet-scrim" id="nc-scrim" hidden>
+    <form class="sheet nc" id="nc-form" role="dialog" aria-modal="true" aria-labelledby="nc-title">
+      <header class="sheet-head"><h2 class="sheet-title" id="nc-title">New chat</h2>
+        <p class="sheet-sub">Opens in a VSCode terminal. Model, effort and permission apply to this chat only.</p></header>
+      <div class="sheet-body nc-body">
+        <label class="nc-field"><span>Folder</span><select name="cwd" id="nc-cwd"></select></label>
+        <label class="nc-field"><span>Name</span><input name="name" id="nc-name" type="text" placeholder="Api_refactor" autocomplete="off" spellcheck="false" maxlength="60" /></label>
+        <div class="nc-field"><span>Model</span><div class="pop-opts" data-name="model"></div></div>
+        <div class="nc-field"><span>Effort</span><div class="pop-opts" data-name="effort"></div></div>
+        <div class="nc-field"><span>Permission</span><div class="pop-opts" data-name="permission"></div></div>
+        <label class="nc-field" id="nc-account-field"><span>Account</span><select name="account" id="nc-account"></select></label>
+        <div class="nc-field" id="nc-machine-field"><span>Machine</span><div class="pop-opts" data-name="machine"></div></div>
+        <p class="nc-hint" id="nc-hint"></p>
+      </div>
+      <footer class="sheet-foot"><p class="sheet-note" id="nc-note"></p>
+        <div class="sheet-actions"><button class="btn" id="nc-cancel" type="button">Cancel</button><button class="btn btn-primary" id="nc-go" type="submit">Start</button></div></footer>
+    </form>
+  </div>
+
+  <div class="sheet-scrim" id="sheet-scrim" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <header class="sheet-head">
+        <p class="sheet-kicker">Move to Trash</p>
+        <h2 class="sheet-title" id="sheet-title"></h2>
+        <p class="sheet-sub" id="sheet-sub" translate="no"></p>
+      </header>
+      <div class="sheet-body" id="sheet-body"></div>
+      <footer class="sheet-foot">
+        <p class="sheet-note">Everything goes to the Finder Trash. Nothing is erased.</p>
+        <div class="sheet-actions">
+          <button class="btn" id="sheet-cancel" type="button">Cancel</button>
+          <button class="btn btn-danger" id="sheet-confirm" type="button">Move to Trash</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="index.js"></script>
+</body>
+</html>

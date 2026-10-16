@@ -1,0 +1,21 @@
+{
+  "name": "csr-bridge",
+  "displayName": "Claude Session Restore bridge",
+  "description": "Lets the Claude Session Restore app open, reopen and type into the VS Code terminals its chats run in.",
+  "publisher": "claude-session-restore",
+  "version": "1.0.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Acts only on requests the Claude Session Restore app writes under ~/.claude-restore/vscode; it reads nothing from the workspace."
+    }
+  }
+}
