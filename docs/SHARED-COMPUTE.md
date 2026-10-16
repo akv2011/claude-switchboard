@@ -28,7 +28,7 @@ A swapped-out idle chat echoed a keystroke in a median 0.09 s with RAM free, and
 
 ## 2. Operating system
 
-A minimal Linux install with no desktop works best; these notes are from Arch Linux, and the same settings exist on any distribution.
+A minimal Linux install with no desktop works best; these notes are from Arch Linux, and the same settings exist on any distribution. [LINUX-SETUP.md](LINUX-SETUP.md) is the full install from a blank disk, with `tools/linux-setup/configure-arch.sh` and `post-install.sh` doing the settings below.
 
 - **Headless and always on.** Boot to `multi-user.target`. Ignore the lid switch (`HandleLidSwitch=ignore` in `logind.conf`) and mask the sleep targets (`systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`). Blank the console (`consoleblank=60` on the kernel line).
 - **Memory: zswap over a disk swapfile, not zram.** zram cannot hand cold pages to disk in LRU order, and zram plus disk swap inverts the LRU. Settings used: zswap with zstd, `max_pool_percent=35`, `shrinker_enabled=1`; a swapfile twice the RAM; `vm.swappiness=150`; MGLRU on; `systemd-oomd` running. Under an 11 GB balloon on top of 40 chats, zswap held 3.9 GB of chat memory in 0.77 GB (5.1x), nothing was killed, and pressure fell back to 2% when the balloon stopped.
