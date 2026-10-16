@@ -1,0 +1,33 @@
+{
+  "name": "claude-session-restore",
+  "version": "1.0.0",
+  "description": "A macOS window for every Claude Code chat: see what each is doing, restore them after a shutdown, steer them, and move them to a second machine.",
+  "type": "module",
+  "bin": {
+    "csr": "./bin/csr.js"
+  },
+  "scripts": {
+    "test": "TZ=Australia/Adelaide node --test test/*.test.js",
+    "daemon": "node src/recorder/daemon.js",
+    "gui": "electrobun build --env=stable",
+    "bridge": "cd vscode-bridge && bunx --bun @vscode/vsce@3 package --no-dependencies --skip-license --allow-missing-repository -o csr-bridge.vsix && code --install-extension csr-bridge.vsix --force",
+    "install-app": "bun run gui && scripts/install.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "electrobun": "^1.18.1"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "vscode",
+    "session",
+    "restore",
+    "cli",
+    "macos",
+    "electrobun"
+  ]
+}

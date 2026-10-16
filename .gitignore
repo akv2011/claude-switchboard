@@ -1,0 +1,14 @@
+node_modules/
+build/
+artifacts/
+*.log
+.DS_Store
+vscode-bridge/*.vsix
+dist/
+test/harness/
+.env
+.env.*
+*.pem
+*.key
+.claude/
+.playwright-mcp/
