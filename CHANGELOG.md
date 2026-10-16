@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A chat that stops while others keep running in its folder stays on the restore offer. It was offered for one 30-second poll, then dropped.
+
 ## 1.0.1
 
 - A window left hidden for a while no longer says it could not load the chats when shown again. WebKit freezes a hidden window's page; a request in flight then timed out on waking although the app had answered. Reads are now asked once more; actions are not.
