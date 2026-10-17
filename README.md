@@ -78,7 +78,7 @@ A chat running on the second machine, with its live terminal screen refreshed ev
 git clone https://github.com/akv2011/claude-switchboard.git
 cd claude-switchboard
 bun install
-npm test                 # node --test, 186 tests, no network
+npm test                 # node --test, 189 tests, no network
 npm run bridge           # packages and installs the VS Code extension
 bun run gui              # builds build/stable-macos-arm64/Claude Switchboard.app
 scripts/install.sh       # copies the app to /Applications, installs the recorder, opens it
