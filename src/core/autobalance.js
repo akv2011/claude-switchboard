@@ -39,6 +39,8 @@ export const writeState = (s) => writeJson(stateFile(), s);
 // config.json's localOnlyMcp adds MCP servers that only this Mac can serve.
 const LOCAL_ONLY_MCP = ['claude-in-chrome__', 'plugin_playwright_', 'plugin_chrome-devtools-mcp_'];
 const LOCAL_ONLY_INPUT = /\/Volumes\/|\bosascript\b|\bscreencapture\b|\bopen -a\b/;
+// .git never syncs to the remote, so a chat that commits or pushes would stop at its next commit.
+const LOCAL_ONLY_GIT = /\bgit\s+(?:-C\s+\S+\s+)?(?:commit|push)\b/;
 
 /** Pure: the first local-only tool or path in these transcript entries, or null. */
 export function localOnlyUse(entries, mcpPrefixes = []) {
@@ -49,7 +51,9 @@ export function localOnlyUse(entries, mcpPrefixes = []) {
       if (c?.type !== 'tool_use') continue;
       const name = String(c.name ?? '');
       if (prefixes.some((p) => name.startsWith(p))) return name.slice('mcp__'.length).split('__')[0];
-      const hit = JSON.stringify(c.input ?? {}).match(LOCAL_ONLY_INPUT);
+      const input = JSON.stringify(c.input ?? {});
+      if (LOCAL_ONLY_GIT.test(input)) return 'git';
+      const hit = input.match(LOCAL_ONLY_INPUT);
       if (hit) return hit[0].trim();
     }
   }

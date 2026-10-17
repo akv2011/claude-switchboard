@@ -148,7 +148,7 @@ h1, h2 { font-weight: 500; }
   border: 0;
   border-radius: var(--radius);
   background: none;
-  color: var(--text-2);
+  color: var(--text);
   font-size: 15px;
   text-align: left;
   cursor: pointer;
@@ -160,8 +160,8 @@ h1, h2 { font-weight: 500; }
 .nav-item[data-depth="2"] { padding-left: 36px; }
 
 .nav-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.nav-parent { color: var(--text-3); }
-.nav-count { font-size: 13.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.nav-parent { color: var(--text-2); }
+.nav-count { font-size: 13.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .nav-item[aria-current="true"] .nav-count { color: var(--text-2); }
 .nav-count.live { color: var(--blue); }
 .nav-count.needs { color: var(--amber); }
@@ -801,11 +801,11 @@ h1, h2 { font-weight: 500; }
 .tdot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; margin-right: 8px; display: inline-block; vertical-align: 1px; }
 .tdot[data-level="live"] { background: var(--blue); }
 .tdot[data-level="needs"] { background: var(--amber); }
-.nav-line .nav-count { color: var(--text-3); }
+.nav-line .nav-count { color: var(--text-2); }
 .nav-line.is-chat { padding-left: calc(38px + var(--depth, 0) * 14px); }
-.nav-state { margin-left: auto; padding-left: 6px; font-size: 13.5px; color: var(--text-3); white-space: nowrap; }
+.nav-state { margin-left: auto; padding-left: 6px; font-size: 13.5px; color: var(--text-2); white-space: nowrap; }
 .nav-chat.is-needs .nav-state { color: var(--amber); }
-.nav-chat .nav-label { color: var(--text-2); }
+.nav-chat .nav-label { color: var(--text); }
 .nav-chat[aria-current="true"] .nav-label { color: var(--text); }
 .nav-chev.is-blank::before { display: none; }
 /* The blank in front of a chat line holds its place only; it is not a control to hover. */
@@ -936,7 +936,7 @@ h1, h2 { font-weight: 500; }
 .nav-confirm .btn { min-height: 28px; padding: 0 10px; font-size: 13.5px; }
 .nav-switch { display: flex; margin: 18px 0 12px; }
 .nav-switch .sort-btn { flex: 1; min-height: 32px; font-size: 14px; }
-.nav-item.is-none .nav-label { color: var(--text-3); }
+.nav-item.is-none .nav-label { color: var(--text-2); }
 .d-group { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 13.5px; color: var(--text-3); }
 .d-group select { min-height: 30px; min-width: 0; max-width: 100%; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; }
 
