@@ -5,7 +5,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, DEFAULTS } from '../src/core/autobalance.js';
+import { decide, localOnlyUse, DEFAULTS } from '../src/core/autobalance.js';
+import { parseConfig } from '../src/core/config.js';
 
 const now = Date.parse('2026-10-16T12:00:00Z');
 const chat = (name, extra = {}) => ({ name, machine: 'mac', live: true, status: 'idle', needsYou: false, stoppedOn: null, cwd: '/w', modifiedAt: now - 30 * 60_000, rssMb: 400, ...extra });
@@ -42,4 +43,35 @@ test('never takes a chat in use, waiting on you, stopped on a limit, or recently
 
 test('keeps the remote machine\'s reserve', () => {
   assert.match(decide({ ...base, remote: { reachable: true, level: 'ok', availableMb: 3200 } }).wait, /under 3 GB free/);
+});
+
+const use = (name, input = {}) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
+
+test('a chat that lately used what only this Mac has stays here', () => {
+  const d = decide({ ...base, sessions: [chat('small', { rssMb: 300 }), chat('big', { rssMb: 900, localOnly: 'claude-in-chrome' })] });
+  assert.equal(d.move.name, 'small', 'the larger chat drives this Mac\'s browser');
+  const none = decide({ ...base, sessions: [chat('big', { localOnly: 'claude-in-chrome' })] });
+  assert.match(none.wait, /only this Mac has \(big: claude-in-chrome\)/);
+});
+
+test('local-only use is read from tool calls, not from talk about them', () => {
+  assert.equal(localOnlyUse([use('mcp__claude-in-chrome__navigate')]), 'claude-in-chrome');
+  assert.equal(localOnlyUse([use('mcp__plugin_playwright_playwright__browser_navigate')]), 'plugin_playwright_playwright');
+  assert.equal(localOnlyUse([use('mcp__plugin_chrome-devtools-mcp_chrome-devtools__click')]), 'plugin_chrome-devtools-mcp_chrome-devtools');
+  assert.equal(localOnlyUse([use('Bash', { command: 'ls "/Volumes/Backup Disk/archive"' })]), '/Volumes/');
+  assert.equal(localOnlyUse([use('Bash', { command: 'osascript -e "beep"' })]), 'osascript');
+  assert.equal(localOnlyUse([use('Bash', { command: 'open -a Safari x.html' })]), 'open -a');
+  assert.equal(localOnlyUse([use('Bash', { command: 'npm test' }), use('mcp__context7__query-docs')]), null);
+  assert.equal(localOnlyUse([{ type: 'user', message: { content: 'drive mcp__claude-in-chrome and /Volumes/ later' } }]), null);
+});
+
+test('MCP servers of your own count only when config.json names them', () => {
+  const browse = [use('mcp__browser-work__browser_click')];
+  assert.equal(localOnlyUse(browse), null);
+  assert.equal(localOnlyUse(browse, ['browser-']), 'browser-work');
+  assert.deepEqual(parseConfig({}).localOnlyMcp, []);
+  assert.deepEqual(parseConfig({ localOnlyMcp: ['browser-', 'disasm'] }).localOnlyMcp, ['browser-', 'disasm']);
+  const bad = parseConfig({ localOnlyMcp: ['', 'a b'] });
+  assert.deepEqual(bad.localOnlyMcp, [], 'an empty start would match every MCP server');
+  assert.match(bad.errors[0], /localOnlyMcp/);
 });

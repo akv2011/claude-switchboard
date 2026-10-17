@@ -31,11 +31,12 @@ Two parts:
 **Share the work with a second machine (optional)**
 - Configure an ssh-reachable Linux box that has tmux and Claude Code. The window shows both machines' memory, swap, pressure and load.
 - Move a chat there, live: it closes cleanly, its project and transcript sync over, it resumes in tmux, and it reopens attached in the same VS Code tab. Move it back the same way.
-- Balance moves idle chats off a strained Mac. Auto-balance, off by default, does it one chat at a time with checks.
+- Balance moves idle chats off a strained Mac. Auto-balance, off by default, does it one chat at a time with checks. Both leave a chat that lately used what only this Mac has, such as its browser, a mounted drive or a Mac app.
 - Watch a remote chat's live screen from the window.
 
 **Accounts (optional)**
-- With [claude-swap](https://github.com/realiti4/claude-swap) installed, an Accounts tab shows each account's 5-hour, weekly and per-model usage with reset times. It can switch accounts, or start a chat as a given account. A notification fires when an account passes 85% of its 5-hour window or 80% of its week; it never switches on its own.
+- With [claude-swap](https://github.com/realiti4/claude-swap) installed, an Accounts tab shows each account's 5-hour, weekly and per-model usage with reset times. It can switch accounts, or start a chat as a given account. A notification fires when an account passes 85% of its 5-hour window or 80% of its week; it never switches this Mac's account on its own.
+- With claude-swap on the remote too, the recorder keeps the remote on this Mac's active account, or one of the same organization, so a moved chat stays on the account it ran on.
 
 **Shared compute from the command line**
 - `offload npm test` runs in the same folder on the remote, with files synced both ways by Mutagen and conflicts reported, never overwritten.
@@ -77,7 +78,7 @@ A chat running on the second machine, with its live terminal screen refreshed ev
 git clone https://github.com/akv2011/claude-switchboard.git
 cd claude-switchboard
 bun install
-npm test                 # node --test, 178 tests, no network
+npm test                 # node --test, 186 tests, no network
 npm run bridge           # packages and installs the VS Code extension
 bun run gui              # builds build/stable-macos-arm64/Claude Switchboard.app
 scripts/install.sh       # copies the app to /Applications, installs the recorder, opens it

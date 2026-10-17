@@ -21,7 +21,7 @@ Three processes and one extension:
 - **src/core**: all logic, plain Node-compatible ESM with no dependencies, so the window, the CLI (`bin/switchboard.js`) and the recorder share one implementation.
 - **src/bun/index.ts**: the main process. It is thin: each RPC forwards to `src/core/api.js`.
 - **src/mainview**: the window. Vanilla TypeScript, one stylesheet, bundled Geist fonts. Rows are keyed and updated in place, so a 15-second refresh never re-animates the list.
-- **src/recorder**: a launchd job (`--once` every 30 s) that snapshots what is open, sends usage notifications, and runs auto-balance when it is switched on.
+- **src/recorder**: a launchd job (`--once` every 30 s) that snapshots what is open, sends usage notifications, keeps the remote on this Mac's claude-swap account, and runs auto-balance when it is switched on.
 
 ## Modules in src/core
 
@@ -37,9 +37,10 @@ Three processes and one extension:
 | `remote.js` | The optional second machine: probe, sync (rsync), start, attach, resume and stop in tmux, live screen. |
 | `config.js` | Read and validate `config.json`. |
 | `restart.js` | Change model, effort or permission mode by restarting an idle chat with session-only flags. |
-| `autobalance.js` | The pure auto-balance decision, and its switch and state files. |
+| `autobalance.js` | The pure auto-balance decision, what only this Mac can serve, and its switch and state files. |
 | `background.js` | Background agents blocked on you, from `claude agents --json` plus each job's state file. |
 | `accounts.js`, `usage.js` | claude-swap integration: accounts, switching, usage, notifications. |
+| `remote-account.js` | The remote's claude-swap account follows this Mac's. |
 | `search.js` | Full-text search with ripgrep over the listed chats, text blocks only. |
 | `markdown.js` | Safe rendering of a reply for the detail panel. |
 | `snapshot.js` | What to offer for restore. |

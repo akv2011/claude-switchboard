@@ -8,6 +8,7 @@
  *   {
  *     "remote": { "host": "devbox", "label": "Devbox", "projectsRoot": "~/Projects" },
  *     "projectsRoots": ["~/Projects", "~/Desktop/Projects", "~/code"],
+ *     "localOnlyMcp": ["browser-"],
  *     "notify": { "command": ["/opt/homebrew/bin/terminal-notifier", "-message"] }
  *   }
  *
@@ -37,6 +38,8 @@ const HOST_RE = /^[A-Za-z0-9_][A-Za-z0-9._@-]{0,252}$/;
  * unquoted, so a space or a quote would be split or interpreted there.
  */
 const REMOTE_ROOT_RE = /^(~|~?(\/[A-Za-z0-9._+@=,-]+)+)$/;
+/** An MCP server name, or the start of one, as it appears in tool names (mcp__<server>__<tool>). */
+const MCP_PREFIX_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** "~" and "~/x" relative to `home`; anything else unchanged. */
 export function expandHome(p, home = os.homedir()) {
@@ -50,7 +53,7 @@ const trimSlash = (p) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
  * Validate a parsed config. Pure: `home` is the local home folder.
  *
  * @returns {{remote: null | {host:string, label:string, projectsRoot:string, localProjectsRoot:string},
- *            projectsRoots: string[], notify: {command: string[] | null}, errors: string[]}}
+ *            projectsRoots: string[], localOnlyMcp: string[], notify: {command: string[] | null}, errors: string[]}}
  */
 export function parseConfig(raw, home = os.homedir()) {
   const errors = [];
@@ -84,6 +87,12 @@ export function parseConfig(raw, home = os.homedir()) {
   }
   const projectsRoots = [...new Set(roots.map((x) => trimSlash(expandHome(x.trim(), home))))].filter((x) => path.isAbsolute(x));
 
+  let localOnlyMcp = [];
+  if (obj.localOnlyMcp !== undefined) {
+    if (Array.isArray(obj.localOnlyMcp) && obj.localOnlyMcp.every((x) => typeof x === 'string' && MCP_PREFIX_RE.test(x))) localOnlyMcp = obj.localOnlyMcp;
+    else errors.push('localOnlyMcp must be a list of MCP server names, or the start of one: letters, digits, _ and -');
+  }
+
   let command = null;
   if (obj.notify?.command !== undefined && obj.notify?.command !== null) {
     const c = obj.notify.command;
@@ -91,7 +100,7 @@ export function parseConfig(raw, home = os.homedir()) {
     else errors.push('notify.command must be a list: the program, then its arguments; the message is added last');
   }
 
-  return { remote, projectsRoots, notify: { command }, errors };
+  return { remote, projectsRoots, localOnlyMcp, notify: { command }, errors };
 }
 
 /** The current settings. A missing file is the default; a broken one is reported, not fatal. */
