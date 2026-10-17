@@ -15,7 +15,7 @@
 import { markFamilies, markSameNames } from './families.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { PROJECTS_DIR, isSessionId, encodeCwd, isInsidePath, canBeWorkspaceRoot } from './paths.js';
+import { PROJECTS_DIR, isSessionId, encodeCwd, isInsidePath, canBeWorkspaceRoot, startFolder } from './paths.js';
 import { readHead, parseLines } from './jsonl.js';
 import { resolveName } from './names.js';
 import { readTailFacts, shortModel, asksForYou, contextWindow, permissionLabel } from './model.js';
@@ -57,10 +57,11 @@ export function readCwd(file, sessionId) {
 export function readHeadFacts(file, sessionId) {
   const entries = parseLines(readHead(file, 64 * 1024), 'head');
   let cwd = null;
+  const cwds = new Set();
   let entrypoint = null;
   let parentSessionId = null;
   for (const entry of entries) {
-    if (!cwd && typeof entry.cwd === 'string' && entry.cwd) cwd = entry.cwd;
+    if (typeof entry.cwd === 'string' && entry.cwd) { cwd ??= entry.cwd; cwds.add(entry.cwd); }
     if (!entrypoint && typeof entry.entrypoint === 'string' && entry.entrypoint) {
       entrypoint = entry.entrypoint;
     }
@@ -73,9 +74,8 @@ export function readHeadFacts(file, sessionId) {
         && String(entry.session_id).toLowerCase() !== String(sessionId).toLowerCase()) {
       parentSessionId = entry.session_id;
     }
-    if (cwd && entrypoint && parentSessionId) break;
   }
-  return { cwd, entrypoint, parentSessionId };
+  return { cwd, cwds: [...cwds], entrypoint, parentSessionId };
 }
 
 /**
@@ -302,10 +302,11 @@ export function scanSessions(options = {}) {
       if (cached) nextCache.set(sessionId, cached);
 
       const head = cached
-        ? { cwd: cached.cwd, entrypoint: cached.entrypoint ?? null,
+        ? { cwd: cached.cwd, cwds: cached.cwds ?? [], entrypoint: cached.entrypoint ?? null,
             parentSessionId: cached.parentSessionId ?? null }
         : readHeadFacts(file, sessionId);
-      const cwd = liveEntry?.cwd ?? head.cwd;
+      // Where it was started, not where its own `cd`s left it (see startFolder).
+      const cwd = startFolder(projectDir, [liveEntry?.cwd, head.cwd, ...head.cwds]) ?? liveEntry?.cwd ?? head.cwd;
 
       // A program ran this, not a person. Counted so the window can say so,
       // rather than a list of thousands implying you had that many
@@ -319,6 +320,7 @@ export function scanSessions(options = {}) {
             name: null,
             nameSource: null,
             cwd: head.cwd,
+            cwds: head.cwds,
             entrypoint: head.entrypoint,
             parentSessionId: head.parentSessionId,
             model: null,
@@ -365,6 +367,7 @@ export function scanSessions(options = {}) {
           name: fileName,
           nameSource: fileNameSource,
           cwd: head.cwd,
+          cwds: head.cwds,
           entrypoint: head.entrypoint,
           parentSessionId: head.parentSessionId,
           model,

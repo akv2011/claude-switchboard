@@ -324,6 +324,7 @@ if not sid:
 
 path = by_id[sid]
 name = cwd = None
+cwds = []
 roots = set()
 pat = re.compile(re.escape(projects) + r"/([^/\"\\]+)")
 for line in tail(path):
@@ -335,11 +336,25 @@ for line in tail(path):
         name = e["customTitle"]
     if e.get("cwd"):
         cwd = e["cwd"]
+        if cwd not in cwds:
+            cwds.append(cwd)
     if e.get("type") == "assistant":
         for m in pat.finditer(json.dumps(e.get("message", {}).get("content", ""))):
             d = os.path.join(projects, m.group(1))
             if os.path.isdir(d) and not m.group(1).startswith("."):
                 roots.add(d)
+# The folder it was started in, not where its own cd's left it: the transcript sits in a folder
+# named after the start folder, every character but a letter or digit turned into "-".
+filed = os.path.basename(os.path.dirname(path))
+start = None
+for c in cwds:
+    p = c
+    while p and p != os.path.dirname(p) and not start:
+        start = p if re.sub(r"[^A-Za-z0-9]", "-", p) == filed else None
+        p = os.path.dirname(p)
+    if start:
+        break
+cwd = start or cwd
 pid = next((e.get("pid") for e in registry if e.get("sessionId") == sid and alive(e.get("pid", 0))), 0)
 print("\t".join([sid, cwd or "", name or sid[:8], str(pid), path] + sorted(roots)))
 PY

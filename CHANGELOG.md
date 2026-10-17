@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A chat reopens in the folder it was started in, not where its own cd's left it. Claude records its current folder on every line, so a chat started in its window's folder could reopen in a subfolder, in a new window; `offload move` had the same fault.
+
 - Bring back puts a chat in the window it belongs to, never a new window on its subfolder, and terminals in the editor area open as tabs in one group instead of a new split pane each (VS Code locks terminal-only groups). The detail panel follows its chat when it starts, stops or moves.
 
 - One move per chat across the window and auto-balance. The guard was per process, so pressing Move on a chat auto-balance was moving could close it twice and attach two terminals; the claim is now a lock file both processes see.
