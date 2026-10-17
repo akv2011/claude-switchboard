@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The sidebar has a Folders | Groups switch under Views, Folders by default and remembered. Inside a folder, chats with no name prefix sit under a "No group" line, last, instead of reading as part of the group above them.
+
 - Balance and auto-balance leave a chat that lately used what the remote cannot serve: this Mac's browser through Claude in Chrome or the Playwright and Chrome DevTools plugins, a drive under `/Volumes/`, `osascript`, `screencapture` or `open -a`. Add MCP servers of your own that only this Mac has to `localOnlyMcp` in config.json. A chat moved with that work would stop on the remote.
 - With claude-swap on both machines, the recorder keeps the remote on this Mac's active account, or one of the same organization, and leaves it alone when it has neither. A chat moved there ran on whatever account the remote last had, another organization's limits included. An account counts only when its email matches.
 
