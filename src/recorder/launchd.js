@@ -112,7 +112,18 @@ export function install(options = {}) {
   try {
     execFileSync('launchctl', ['bootout', `gui/${uid}/${LABEL}`], { stdio: 'ignore' });
   } catch { /* not loaded yet */ }
-  execFileSync('launchctl', ['bootstrap', `gui/${uid}`, PLIST_PATH], { stdio: 'inherit' });
+  // bootout can return before a tick that is mid-run has ended, and bootstrap then
+  // fails with status 5, which stopped the install script before it copied the
+  // app. Wait for the old job to go, up to 5 s.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      execFileSync('launchctl', ['bootstrap', `gui/${uid}`, PLIST_PATH], { stdio: 'pipe' });
+      break;
+    } catch (err) {
+      if (attempt >= 10) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+    }
+  }
   return PLIST_PATH;
 }
 

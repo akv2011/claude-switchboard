@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Installing waits for the old recorder job to stop before loading the new one. A load right after an unload could fail with launchctl status 5 and stop the install before it copied the app.
+
 - The restore offer names a chat the way the list does. It used the name saved while the chat ran, which for an unnamed chat is one Claude Code made from the folder, and the terminal tab Bring back opened carried it too.
 
 - A chat reopens in the folder it was started in, not where its own cd's left it. Claude records its current folder on every line, so a chat started in its window's folder could reopen in a subfolder, in a new window; `offload move` had the same fault.
