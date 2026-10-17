@@ -10,7 +10,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { withoutClaudeMarkers, PROJECTS_DIR, encodeCwd, codeBin } from './paths.js';
+import { withoutClaudeMarkers, PROJECTS_DIR, encodeCwd, codeBin, stateDir } from './paths.js';
 import { readConfig } from './config.js';
 import { scanSessions } from './sessions.js';
 import { readLiveSessions } from './registry.js';
@@ -303,10 +303,43 @@ export function remoteLoad(remote) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Chats being moved now or in the last minute, lower-cased. */
+/** Chats this process moved in the last minute, lower-cased. */
 const moving = new Map();
-const movingNow = new Set();
-const inFlight = () => [...moving].filter(([, at]) => Date.now() - at < 60_000).map(([id]) => id);
+
+// The window and the recorder (auto-balance) are separate processes and both move chats,
+// so the claim on a chat is a file either can see: created exclusively, removed
+// when the move ends, and taken over when the process holding it has died.
+const moveLock = (key) => path.join(stateDir(), 'moving', `${key}.lock`);
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+export function claimMove(key) {
+  const file = moveLock(key);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      fs.writeFileSync(file, JSON.stringify({ pid: process.pid, at: Date.now() }), { flag: 'wx' });
+      return true;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      let held = null;
+      try { held = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* half-written: treat as held */ return false; }
+      if (held?.pid && alive(held.pid)) return false;
+      try { fs.unlinkSync(file); } catch { /* the other side removed it first */ }
+    }
+  }
+  return false;
+}
+
+export function releaseMove(key) {
+  try { fs.unlinkSync(moveLock(key)); } catch { /* already released */ }
+}
+
+/** Chats being moved now, by any process, or moved by this one in the last minute. */
+const inFlight = () => {
+  let now = [];
+  try { now = fs.readdirSync(path.join(stateDir(), 'moving')).filter((f) => f.endsWith('.lock')).map((f) => f.slice(0, -5)); } catch { /* none */ }
+  return [...new Set([...now, ...[...moving].filter(([, at]) => Date.now() - at < 60_000).map(([id]) => id)])];
+};
 
 /**
  * Why moving this chat would fail, checked before anything is closed.
@@ -343,7 +376,6 @@ export function movePreflight({ live, scanned, remote, config }) {
  */
 export async function moveLiveSession({ sessionId, force = false, reopen = true }) {
   const key = String(sessionId).toLowerCase();
-  if (movingNow.has(key)) return { ok: false, error: 'it is already being moved' };
   const config = remoteConfig();
   const remote = readRemoteLive({ remote: config, force: true });
   const live = readLiveSessions({ interactiveOnly: false }).find((s) => s.sessionId === sessionId);
@@ -354,7 +386,7 @@ export async function moveLiveSession({ sessionId, force = false, reopen = true 
     return { ok: false, busy: true, error: `${live.name ?? 'the chat'} is ${live.status === 'waiting' ? 'waiting at a prompt' : 'working'}` };
   }
 
-  movingNow.add(key);
+  if (!claimMove(key)) return { ok: false, error: 'it is already being moved' };
   moving.set(key, Date.now());
   try {
     let shellPid = null;
@@ -389,7 +421,7 @@ export async function moveLiveSession({ sessionId, force = false, reopen = true 
     }
     return { ok: true, verified: false, closedOnMac: Boolean(live), error: `moved, but ${config.label} has not listed it yet` };
   } finally {
-    movingNow.delete(key);
+    releaseMove(key);
     moving.set(key, Date.now());
   }
 }
@@ -403,7 +435,6 @@ export async function moveLiveSession({ sessionId, force = false, reopen = true 
  */
 export async function moveToLocal({ sessionId }) {
   const key = String(sessionId).toLowerCase();
-  if (movingNow.has(key)) return { ok: false, error: 'it is already being moved' };
   const config = remoteConfig();
   if (!config) return { ok: false, error: 'no remote machine is configured' };
   const remote = readRemoteLive({ remote: config, force: true });
@@ -421,7 +452,7 @@ export async function moveToLocal({ sessionId }) {
   const remoteFile = transcriptFor(remote.home, remoteCwd, sessionId);
   if (!(await sshScript(config.host, `test -f ${shq(remoteFile)}`)).ok) return { ok: false, error: `its transcript is not on ${config.label}` };
 
-  movingNow.add(key);
+  if (!claimMove(key)) return { ok: false, error: 'it is already being moved' };
   moving.set(key, Date.now());
   try {
     // The VS Code terminal attached to it over ssh, so it comes back in the same tab.
@@ -446,7 +477,7 @@ export async function moveToLocal({ sessionId }) {
     }
     return { ok: true, verified: false, error: 'reopened, but it has not registered yet' };
   } finally {
-    movingNow.delete(key);
+    releaseMove(key);
     moving.set(key, Date.now());
   }
 }

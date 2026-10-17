@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- One move per chat across the window and auto-balance. The guard was per process, so pressing Move on a chat auto-balance was moving could close it twice and attach two terminals; the claim is now a lock file both processes see.
+
 - Every selection-bar button counts every ticked chat. A ticked chat that was also on the restore offer went only to Bring back, so four ticked read as Bring back 1 and Open 3; Bring back now takes them all, each on the machine it last ran on.
 
 - Auto-balance leaves a chat on this Mac when it committed or pushed lately, since .git never syncs to the remote. Sidebar names are white; grey is kept for counts, parent paths and state words.
