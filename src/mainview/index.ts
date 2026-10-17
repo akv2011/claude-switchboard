@@ -84,7 +84,7 @@ type State = { home: string; projects: Project[]; groups: string[]; projectsRoot
 type OfferGroup = { cwd: string; sessions: Session[]; lastSeen: number | null };
 
 /** What the list shows. A view is a filter; a root folder is a scope, and a group may be one inside a root. */
-type View = { kind: 'all' | 'needs' | 'running' | 'stopped' | 'machine' | 'root' | 'group'; value?: string; root?: string };
+type View = { kind: 'all' | 'needs' | 'running' | 'stopped' | 'machine' | 'root' | 'group' | 'loose'; value?: string; root?: string };
 
 let state: State | null = null;
 let view: View = { kind: 'all' };
@@ -202,6 +202,7 @@ function inView(s: Session) {
     case 'machine': return s.live ? s.machine === view.value : s.lastMachine === view.value;
     case 'root': return s.root === view.value;
     case 'group': return s.group === view.value && (view.root === undefined || s.root === view.root);
+    case 'loose': return s.root === view.value && s.groupFrom === 'folder';
   }
 }
 
@@ -224,6 +225,7 @@ function viewTitle() {
     case 'machine': return view.value === 'remote' ? `On ${R()}` : 'On the Mac';
     case 'root': return shortPath(view.value!) || 'No folder';
     case 'group': return view.root === undefined ? view.value! : `${view.value} in ${rootText(view.root)}`;
+    case 'loose': return `No group in ${rootText(view.value!)}`;
   }
 }
 
@@ -825,21 +827,15 @@ function groupLine(name: string, list: Session[], shown: Session[], key: string,
 }
 
 /**
- * The folder tree, open by default: each chat under the folder of the VS Code
- * window it runs in (else the projects root holding it, else two levels below
- * home), never a subfolder; inside a folder its name groups, then chats with
+ * The folder tree: each chat under the folder of the VS Code window it runs
+ * in (else the projects root holding it, else two levels below home), never a
+ * subfolder; inside a folder its name groups, then "No group" for chats with
  * no prefix. Projects roots lead and start open, the rest by size. Clicking a folder
  * gives its view, which holds the folder actions (bring back, the batch buttons).
  */
 function renderFolders() {
   const host = $('projects');
-  const toggle = $('folders-toggle') as HTMLButtonElement;
-  const open = openByDefault('s:folders');
-  toggle.setAttribute('aria-expanded', String(open));
-  toggle.onclick = () => toggleOpen('s:folders', open, true);
-  host.hidden = !open;
   host.innerHTML = '';
-  if (!open) return;
   const all = allSessions();
   const selected = selectedId ? sessionOf(selectedId) : null;
   const byRoot = new Map<string, Session[]>();
@@ -856,7 +852,8 @@ function renderFolders() {
     const list = byRoot.get(root)!;
     const key = `r:${root}`;
     const here = view.kind === 'root' && view.value === root;
-    const rootOpen = isProjectsRoot(root) ? openByDefault(key) : isOpen(key, here || (view.kind === 'group' && view.root === root) || selected?.root === root);
+    const rootOpen = isProjectsRoot(root) ? openByDefault(key)
+      : isOpen(key, here || (view.kind === 'group' && view.root === root) || (view.kind === 'loose' && view.value === root) || selected?.root === root);
     const item = navItem(`${groupDot(list)}${rootLabel(root)}`, n(list.length), here, () => setView({ kind: 'root', value: root }),
       { title: `${groupTitle(shortPath(root) || 'No folder', list)}${hasRemote() ? `\nDrag onto the ${R()} card to move its idle chats.` : ''}`, focusKey: `item:${key}` });
     item.draggable = true;
@@ -878,9 +875,32 @@ function renderFolders() {
       if (confirmingDelete === gkey) host.appendChild(deleteLine(name, members, gkey));
       if (gopen) for (const s of shown) host.appendChild(chatLine(s, name, 1, 'tchat'));
     }
-    for (const s of list.filter((x) => x.groupFrom === 'folder' && !x.sameNameRank).sort(byName(''))) host.appendChild(chatLine(s, '', 0, 'tchat'));
+    // Last, so a chat with no prefix never reads as part of the group above it.
+    const loose = list.filter((s) => s.groupFrom === 'folder');
+    if (!loose.length) continue;
+    const shown = loose.filter((s) => !s.sameNameRank).sort(byName(''));
+    const nkey = `rn:${root}`;
+    const nopen = isOpen(nkey, (view.kind === 'loose' && view.value === root) || (selected?.root === root && selected.groupFrom === 'folder'));
+    const none = navItem(`${groupDot(loose)}No group`, n(loose.length), view.kind === 'loose' && view.value === root,
+      () => setView({ kind: 'loose', value: root }), { title: `${groupTitle(`No group in ${rootText(root)}`, loose)}\nChats whose names have no prefix.`, focusKey: `item:${nkey}` });
+    none.classList.add('is-none');
+    const noneLine = withChevron(none, nkey, nopen);
+    noneLine.style.setProperty('--depth', '1');
+    none.before(pickBox(shown, `Tick every chat with no group in ${rootText(root)}`, `pick:${nkey}`));
+    host.appendChild(noneLine);
+    if (nopen) for (const s of shown) host.appendChild(chatLine(s, '', 1, 'tchat'));
   }
 }
+
+/** Folders or Groups below the views, Folders unless switched; remembered like the zoom level. */
+let navList: 'folders' | 'groups' = (() => { try { return localStorage.getItem('csr.nav.list') === 'groups' ? 'groups' : 'folders'; } catch { return 'folders'; } })();
+function setNavList(next: typeof navList) {
+  navList = next;
+  try { localStorage.setItem('csr.nav.list', next); } catch { /* not remembered */ }
+  renderNav();
+}
+$('list-folders').onclick = () => setNavList('folders');
+$('list-groups').onclick = () => setNavList('groups');
 
 function setView(next: View) {
   view = next;
@@ -982,8 +1002,11 @@ function renderNav() {
     navItem('Stopped', n(t.sessions - running), is('stopped'), () => setView({ kind: 'stopped' }), { focusKey: 'view:stopped' }),
   );
 
-  renderGroups();
-  renderFolders();
+  $('list-folders').setAttribute('aria-pressed', String(navList === 'folders'));
+  $('list-groups').setAttribute('aria-pressed', String(navList === 'groups'));
+  $('projects').hidden = navList !== 'folders';
+  $('groups').hidden = navList !== 'groups';
+  if (navList === 'folders') renderFolders(); else renderGroups();
   const back = focused ? document.querySelector<HTMLElement>(`.nav [data-focus-key="${CSS.escape(focused)}"]`) : null;
   if (back && back !== document.activeElement) {
     back.focus();
@@ -1027,7 +1050,7 @@ function ncHint() {
 function openNewChat() {
   const projects = state!.projects.filter((p) => p.cwd && !baseName(p.label).startsWith('.'));
   // A group's newest chat says which folder its work happens in.
-  const current = view.kind === 'root' ? view.value
+  const current = view.kind === 'root' || view.kind === 'loose' ? view.value
     : view.kind === 'group' ? allSessions().filter(inView).sort((a, b) => b.modifiedAt - a.modifiedAt)[0]?.cwd : null;
   ($('nc-cwd') as HTMLSelectElement).innerHTML = projects.map((p) => `<option value="${escapeHtml(p.cwd!)}"${p.cwd === current ? ' selected' : ''}>${escapeHtml(shortPath(p.cwd))}</option>`).join('');
   const usage = state!.usage ?? [];
@@ -1510,7 +1533,7 @@ function renderBatch() {
   const host = $('batch-acts');
   const chosen = allSessions().filter((s) => picked.has(s.sessionId));
   $('pick-count').textContent = chosen.length ? `${n(chosen.length)} selected` : '';
-  if (!chosen.length && view.kind !== 'group' && view.kind !== 'root') { host.innerHTML = ''; bar.classList.add('is-empty'); return; }
+  if (!chosen.length && view.kind !== 'group' && view.kind !== 'root' && view.kind !== 'loose') { host.innerHTML = ''; bar.classList.add('is-empty'); return; }
   const scope = chosen.length ? chosen : allSessions().filter(inView);
   // Ticked chats on the restore offer come back through it: each on the machine
   // it ran on, folders in the offer's order, chats in the order they were open.
@@ -1640,7 +1663,7 @@ function renderList() {
   if (host.querySelector('.empty')) host.innerHTML = '';
 
   // Sections only when the view mixes states; a filtered view is one list.
-  const grouped = view.kind === 'all' || view.kind === 'machine' || view.kind === 'root' || view.kind === 'group';
+  const grouped = view.kind === 'all' || view.kind === 'machine' || view.kind === 'root' || view.kind === 'group' || view.kind === 'loose';
   const states: Array<{ kind: string; label: string; is: (s: Session) => boolean }> = [
     { kind: 'needs', label: 'Needs you', is: (s) => s.needsYou },
     { kind: 'running', label: 'Running', is: (s) => s.live && !s.needsYou },

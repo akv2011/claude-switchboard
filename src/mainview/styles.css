@@ -808,6 +808,8 @@ h1, h2 { font-weight: 500; }
 .nav-chat .nav-label { color: var(--text-2); }
 .nav-chat[aria-current="true"] .nav-label { color: var(--text); }
 .nav-chev.is-blank::before { display: none; }
+/* The blank in front of a chat line holds its place only; it is not a control to hover. */
+.nav-chev.is-blank { pointer-events: none; }
 .nav-scroll { overflow-x: hidden; }
 .nav-line { min-width: 0; }
 
@@ -932,10 +934,9 @@ h1, h2 { font-weight: 500; }
 .nav-confirm { display: flex; flex-direction: column; gap: 8px; margin: 2px 0 8px 48px; padding: 8px 10px; border: 1px solid var(--red); border-radius: var(--radius); font-size: 13.5px; color: var(--text-2); }
 .nav-confirm-row { display: flex; justify-content: flex-end; gap: 6px; }
 .nav-confirm .btn { min-height: 28px; padding: 0 10px; font-size: 13.5px; }
-.nav-fold { display: inline-flex; align-items: center; gap: 7px; min-height: 24px; padding: 0 4px 0 0; border: 0; border-radius: var(--radius); background: none; color: inherit; font: inherit; cursor: pointer; }
-.nav-fold::before { content: ""; border-left: 4.5px solid currentColor; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform 140ms var(--ease); }
-.nav-fold[aria-expanded="true"]::before { transform: rotate(90deg); }
-.nav-fold:hover { color: var(--text); }
+.nav-switch { display: flex; margin: 18px 0 12px; }
+.nav-switch .sort-btn { flex: 1; min-height: 32px; font-size: 14px; }
+.nav-item.is-none .nav-label { color: var(--text-3); }
 .d-group { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 13.5px; color: var(--text-3); }
 .d-group select { min-height: 30px; min-width: 0; max-width: 100%; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; }
 
