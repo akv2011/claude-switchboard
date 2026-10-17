@@ -183,7 +183,7 @@ async function reopenInVscode(root, sessions) {
   let error = null;
   for (const s of sessions) {
     const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : root;
-    const r = await runInVscodeTerminal({ cwd, name: s.name ?? s.sessionId.slice(0, 8), text: resumeCommand(s.sessionId) });
+    const r = await runInVscodeTerminal({ cwd, window: root, name: s.name ?? s.sessionId.slice(0, 8), text: resumeCommand(s.sessionId) });
     if (r.ok) started += 1;
     else error ??= r.error;
   }
@@ -193,7 +193,7 @@ async function reopenInVscode(root, sessions) {
 async function attachEach(root, sessions) {
   let attached = 0;
   for (const s of sessions) {
-    const r = await attachSession({ name: s.name ?? s.sessionId.slice(0, 8), cwd: s.cwd && fs.existsSync(s.cwd) ? s.cwd : root });
+    const r = await attachSession({ name: s.name ?? s.sessionId.slice(0, 8), cwd: s.cwd && fs.existsSync(s.cwd) ? s.cwd : root, window: root });
     if (r.ok) attached += 1;
   }
   return attached;
@@ -237,7 +237,7 @@ export async function restoreGroups(groups, options = {}) {
  * terminal it last ran in when `shellPid` names one. Terminal.app only when
  * the chat has no folder on this Mac to open.
  */
-export function attachSession({ name, cwd, shellPid = null }) {
+export function attachSession({ name, cwd, shellPid = null, window = null }) {
   if (typeof name !== 'string' || !name) return Promise.resolve({ ok: false, error: 'no session named' });
   const remote = remoteConfig();
   if (!remote) return Promise.resolve({ ok: false, error: 'no remote machine is configured' });
@@ -246,7 +246,7 @@ export function attachSession({ name, cwd, shellPid = null }) {
   // something runs there now (the person started claude again), that program
   // would get the text as input; open a new terminal instead.
   const reuse = shellPid && !hasChildren(shellPid) ? shellPid : null;
-  return runInVscodeTerminal({ shellPid: reuse, cwd, name, text: attachCommand(remote.host, name) });
+  return runInVscodeTerminal({ shellPid: reuse, cwd, window, name, text: attachCommand(remote.host, name) });
 }
 
 /** Full-text search over the chats the window lists. */

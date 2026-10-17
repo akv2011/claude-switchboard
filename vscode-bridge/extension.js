@@ -77,7 +77,12 @@ async function scan() {
 
       const reuse = own && own.exitStatus === undefined;
       if (own && !reuse) own.dispose();
-      const term = reuse ? own : vscode.window.createTerminal({ name: req.name, cwd: req.cwd });
+      // Terminals open in the editor area here, and VS Code locks a group that holds only
+      // terminals, so one created without a place lands in a new split pane: tab it beside them.
+      const group = vscode.window.tabGroups.all.find((g) => g.tabs.some((t) => t.input instanceof vscode.TabInputTerminal));
+      const term = reuse ? own : vscode.window.createTerminal({
+        name: req.name, cwd: req.cwd, ...(group ? { location: { viewColumn: group.viewColumn, preserveFocus: true } } : {}),
+      });
       term.show(false);
       term.sendText(req.text, true);
       fs.writeFileSync(path.join(DONE, entry), JSON.stringify({ reused: Boolean(reuse), folder: mine[0] ?? null, at: Date.now() }));

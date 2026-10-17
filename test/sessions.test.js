@@ -105,7 +105,7 @@ test('a transcript with no entrypoint is kept, not assumed to be an SDK run', ()
 
 test('a name Claude Code derived from the folder loses to the title you set', () => {
   // The registry carries nameSource: "derived" when Claude Code invents a name
-  // from the directory, such as "projects-d8" or "armorio-40". Three live
+  // from the directory, such as "projects-d8" or "work-40". Three live
   // sessions showed those instead of Shop_ci, SDK_Sync and AWS_Deployment,
   // which were sitting in their transcripts as custom titles the whole time.
   const { preferredLiveName } = requireSessions();

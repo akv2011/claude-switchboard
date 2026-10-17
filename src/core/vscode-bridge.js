@@ -79,7 +79,7 @@ export async function typeIntoTerminal({ shellPid, text, newline = true }, { roo
 }
 
 export async function runInVscodeTerminal(
-  { shellPid = null, cwd, name, text },
+  { shellPid = null, cwd, name, text, window = null },
   { root = ROOT, openAfterMs = 4500, giveUpMs = 25_000, open = (dir) => code([dir]) } = {},
 ) {
   const requests = path.join(root, 'requests');
@@ -103,7 +103,8 @@ export async function runInVscodeTerminal(
     }
     if (!opened && Date.now() - started > openAfterMs) {
       opened = true;
-      await open(cwd);
+      // The window the chat belongs in, which may be a parent of its own folder.
+      await open(window && fs.existsSync(window) ? window : cwd);
     }
     await sleep(250);
   }
