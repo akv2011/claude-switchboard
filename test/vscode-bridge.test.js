@@ -53,6 +53,19 @@ test('an unclaimed request opens the folder once, then gives up and cleans up', 
   assert.equal(fs.readdirSync(path.join(root, 'requests')).length, 0);
 });
 
+test('an unclaimed request opens the chat\'s window, not a window on its subfolder', async () => {
+  // Seen live: a chat run from a subfolder got a new window on that subfolder
+  // instead of the window it belongs to.
+  const root = tmpRoot();
+  const window = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-window-'));
+  const seen = [];
+  await runInVscodeTerminal(
+    { cwd: path.join(window, 'api'), window, name: 'x', text: 'echo hi' },
+    { root, open: async (d) => seen.push(d), openAfterMs: 100, giveUpMs: 600 },
+  );
+  assert.deepEqual(seen, [window]);
+});
+
 test('shq quotes names for the shell', () => {
   assert.equal(shq("it's"), `'it'\\''s'`);
 });

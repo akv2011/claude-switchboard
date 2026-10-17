@@ -405,8 +405,11 @@ function closeDetail() {
   document.querySelectorAll('.row.is-selected').forEach((r) => r.classList.remove('is-selected'));
 }
 
+let detailSig = '';
+
 async function openDetail(s: Session) {
   selectedId = s.sessionId;
+  detailSig = rowSignature(s);
   window.clearInterval(peekTimer);
   document.querySelectorAll('.row.is-selected').forEach((r) => r.classList.remove('is-selected'));
   rowEls.get(s.sessionId)?.classList.add('is-selected');
@@ -1546,7 +1549,9 @@ function renderBatch() {
   const stopped = startable(sortSessions(scope));
   const rest = chosen.length ? stopped.filter((s) => !offered.has(s.sessionId)) : [];
   const byCwd = new Map<string, Session[]>();
-  for (const s of rest) (byCwd.get(s.cwd!) ?? byCwd.set(s.cwd!, []).get(s.cwd!)!).push({ ...s, machine: s.lastMachine ?? 'mac' });
+  // By the VS Code window the chat ran in (the folder the sidebar files it under), not its
+  // own folder: a chat run from work/api belongs in the work window, not a new api one.
+  for (const s of rest) { const w = s.root ?? s.cwd!; (byCwd.get(w) ?? byCwd.set(w, []).get(w)!).push({ ...s, machine: s.lastMachine ?? 'mac' }); }
   const backGroups: OfferGroup[] = [...offer, ...[...byCwd].map(([cwd, sessions]) => ({ cwd, sessions, lastSeen: null }))];
   const back = offered.size + rest.length;
   const remoteUp = hasRemote() && state!.remote.reachable;
@@ -1998,6 +2003,9 @@ async function refresh() {
     renderOffer();
     renderList();
     if (selectedId && !sessionById.has(selectedId)) closeDetail();
+    // The panel is drawn when it opens; redraw it when its chat changed (started, stopped,
+    // moved), or it kept saying "Stopped" beside a row that said Running.
+    else if (selectedId && rowSignature(sessionById.get(selectedId)!) !== detailSig) openDetail(sessionById.get(selectedId)!);
   } catch (err) {
     $('recorder-label').textContent = 'Cannot read chats';
     $('nav-foot').textContent = 'Could not load';
