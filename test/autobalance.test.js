@@ -61,6 +61,9 @@ test('local-only use is read from tool calls, not from talk about them', () => {
   assert.equal(localOnlyUse([use('Bash', { command: 'ls "/Volumes/Backup Disk/archive"' })]), '/Volumes/');
   assert.equal(localOnlyUse([use('Bash', { command: 'osascript -e "beep"' })]), 'osascript');
   assert.equal(localOnlyUse([use('Bash', { command: 'open -a Safari x.html' })]), 'open -a');
+  assert.equal(localOnlyUse([use('Bash', { command: 'git add a.js && git commit -m "x"' })]), 'git');
+  assert.equal(localOnlyUse([use('Bash', { command: 'git -C ~/Projects/site push origin main' })]), 'git');
+  assert.equal(localOnlyUse([use('Bash', { command: 'git status && git log --oneline -3 && git diff' })]), null);
   assert.equal(localOnlyUse([use('Bash', { command: 'npm test' }), use('mcp__context7__query-docs')]), null);
   assert.equal(localOnlyUse([{ type: 'user', message: { content: 'drive mcp__claude-in-chrome and /Volumes/ later' } }]), null);
 });
