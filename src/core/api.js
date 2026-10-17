@@ -18,7 +18,7 @@ import { pidExists } from './liveness.js';
 import { readTailEntries } from './jsonl.js';
 import { runInVscodeTerminal, typeIntoTerminal, parentPid, hasChildren, shq, bridgeInstalled } from './vscode-bridge.js';
 import { macLoad, health } from './load.js';
-import { decide, readConfig as readAutoConfig, readState as readAutoState, writeState as writeAutoState, setEnabled as setAutoBalance } from './autobalance.js';
+import { decide, localOnlyUse, readConfig as readAutoConfig, readState as readAutoState, writeState as writeAutoState, setEnabled as setAutoBalance } from './autobalance.js';
 import { readUsage } from './usage.js';
 import { cswapPath } from './accounts.js';
 import { launchFlags } from './restart.js';
@@ -451,6 +451,12 @@ export async function moveToLocal({ sessionId }) {
   }
 }
 
+/** What a chat here used lately that the remote cannot serve, from its last 1 MB. */
+function localOnlyOf(s, mcpPrefixes) {
+  if (!s.projectDir || !s.sessionId) return null;
+  return localOnlyUse(readTailEntries(path.join(PROJECTS_DIR, s.projectDir, `${s.sessionId}.jsonl`), 1024 * 1024), mcpPrefixes);
+}
+
 /**
  * Move idle Mac chats to the remote, largest first, while the Mac is strained
  * (pressure, swapping, memory used; see load.js) and the remote has room.
@@ -466,13 +472,14 @@ export async function moveToLocal({ sessionId }) {
 export async function autoBalanceTick({ notify, say = () => {} } = {}) {
   const config = readAutoConfig();
   const state = readAutoState();
-  const remoteConfig = readConfig().remote;
+  const { remote: remoteConfig, localOnlyMcp } = readConfig();
   if (!config.enabled || !remoteConfig) { state.strained = 0; writeAutoState(state); return { wait: 'off' }; }
   const mac = health(macLoad({ samples: state.samples }));
   state.strained = mac.level === 'ok' || mac.level === 'unknown' ? 0 : state.strained + 1;
   const remoteLive = readRemoteLive({ remote: remoteConfig });
   const remote = { reachable: remoteLive.reachable, level: health(remoteLoad(remoteLive)).level, availableMb: remoteLive.memAvailableMb };
   const { sessions } = scanSessions({ remoteLive });
+  for (const s of sessions) if (s.machine === 'mac' && s.live && s.status === 'idle') s.localOnly = localOnlyOf(s, localOnlyMcp);
   const d = decide({ config, state, mac, remote, sessions });
   state.last = { at: Date.now(), wait: d.wait ?? null, moving: d.move?.name ?? null };
   writeAutoState(state);
@@ -493,7 +500,7 @@ export { setAutoBalance };
 export async function balanceToRemote({ max = 5, remoteReserveMb = 3072 } = {}) {
   const moved = [];
   const skipped = [];
-  const config = remoteConfig();
+  const { remote: config, localOnlyMcp } = readConfig();
   if (!config) return { ok: false, error: 'no remote machine is configured', moved, skipped };
   let remote = readRemoteLive({ remote: config, force: true });
   if (!remote.reachable) return { ok: false, error: `${config.label} is unreachable`, moved, skipped };
@@ -505,6 +512,8 @@ export async function balanceToRemote({ max = 5, remoteReserveMb = 3072 } = {}) 
     .sort((a, b) => (b.rssMb ?? 0) - (a.rssMb ?? 0));
   for (const s of candidates) {
     if (moved.length >= max) break;
+    const localOnly = localOnlyOf(s, localOnlyMcp);
+    if (localOnly) { skipped.push({ name: s.name, error: `it uses ${localOnly}, which only this Mac has` }); continue; }
     if (health(macLoad()).level === 'ok') break;
     const room = (remote.memAvailableMb ?? 0) - (s.rssMb ?? 400);
     if (room < remoteReserveMb || health(remoteLoad(remote)).level !== 'ok') {

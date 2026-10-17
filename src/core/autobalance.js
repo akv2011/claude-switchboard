@@ -2,13 +2,12 @@
  * Automatic balancing, off until switched on. Each recorder tick may move at
  * most one chat from a strained Mac to a healthy remote machine, and only a
  * chat that nobody is using: idle, not waiting on the person, not stopped on
- * a limit, quiet for 20 minutes. The Mac must have been strained for two
- * ticks in a row (a minute), the remote must keep 3 GB free after the move,
- * and moves are at least 5 minutes apart.
- *
- * Only the decision lives here so far. Nothing calls decide() yet: the
- * recorder does not move chats on its own in this release. The manual
- * "Balance" button in the window (api.js balanceToRemote) does.
+ * a limit, quiet for 20 minutes, and not lately using what only this Mac has.
+ * The Mac must have been strained for two ticks in a row (a minute), the
+ * remote must keep 3 GB free after the move, and moves are at least 5 minutes
+ * apart. The recorder runs it each tick while it is switched on (api.js
+ * autoBalanceTick); the chat reopens in its own VS Code tab, and a notice says
+ * what moved and why.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,6 +33,29 @@ export function setEnabled(enabled) {
 export const readState = () => readJson(stateFile(), { strained: 0, lastMoveAt: 0, samples: [], last: null });
 export const writeState = (s) => writeJson(stateFile(), s);
 
+// What a chat cannot do on the remote: drive this Mac's browser through the
+// Chrome extension or the browser plugins, reach a mounted drive, or script
+// Mac apps. A chat that did one of these lately would hit a wall after a move.
+// config.json's localOnlyMcp adds MCP servers that only this Mac can serve.
+const LOCAL_ONLY_MCP = ['claude-in-chrome__', 'plugin_playwright_', 'plugin_chrome-devtools-mcp_'];
+const LOCAL_ONLY_INPUT = /\/Volumes\/|\bosascript\b|\bscreencapture\b|\bopen -a\b/;
+
+/** Pure: the first local-only tool or path in these transcript entries, or null. */
+export function localOnlyUse(entries, mcpPrefixes = []) {
+  const prefixes = [...LOCAL_ONLY_MCP, ...mcpPrefixes].map((p) => `mcp__${p}`);
+  for (const e of entries) {
+    if (e?.type !== 'assistant' || !Array.isArray(e.message?.content)) continue;
+    for (const c of e.message.content) {
+      if (c?.type !== 'tool_use') continue;
+      const name = String(c.name ?? '');
+      if (prefixes.some((p) => name.startsWith(p))) return name.slice('mcp__'.length).split('__')[0];
+      const hit = JSON.stringify(c.input ?? {}).match(LOCAL_ONLY_INPUT);
+      if (hit) return hit[0].trim();
+    }
+  }
+  return null;
+}
+
 /**
  * Pure: what this tick should do. Returns { move } with the chat to move, or
  * { wait } with the reason it does not.
@@ -45,9 +67,12 @@ export function decide({ config, state, mac, remote, sessions, now = Date.now() 
   if (now - (state.lastMoveAt ?? 0) < config.cooldownMin * 60_000) return { wait: 'a chat moved less than 5 minutes ago' };
   if (!remote.reachable || remote.level !== 'ok') return { wait: 'the remote machine is not healthy' };
   const idleFor = config.idleMin * 60_000;
-  const unused = sessions
+  const idle = sessions
     .filter((s) => s.machine === 'mac' && s.live && s.status === 'idle' && !s.needsYou && !s.stoppedOn && s.cwd && now - s.modifiedAt >= idleFor);
-  if (!unused.length) return { wait: `no chat has been idle ${config.idleMin} minutes` };
+  const unused = idle.filter((s) => !s.localOnly);
+  if (!unused.length) {
+    return { wait: idle.length ? `the idle chats use what only this Mac has (${idle[0].name}: ${idle[0].localOnly})` : `no chat has been idle ${config.idleMin} minutes` };
+  }
   const fits = unused
     .filter((s) => (remote.availableMb ?? 0) - (s.rssMb ?? 500) >= config.remoteReserveMb)
     .sort((a, b) => (b.rssMb ?? 0) - (a.rssMb ?? 0));

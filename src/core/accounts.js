@@ -11,7 +11,8 @@
  *
  * A switch is global on this Mac: per claude-swap's README, running chats
  * pick up the new account within about 30 s (the Keychain cache), and new
- * ones start on it. A remote machine has its own login and is not touched.
+ * ones start on it. A remote machine has its own login; with claude-swap there
+ * too, the recorder moves it to the same account (remote-account.js).
  */
 import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';

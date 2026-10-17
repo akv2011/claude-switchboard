@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Balance and auto-balance leave a chat that lately used what the remote cannot serve: this Mac's browser through Claude in Chrome or the Playwright and Chrome DevTools plugins, a drive under `/Volumes/`, `osascript`, `screencapture` or `open -a`. Add MCP servers of your own that only this Mac has to `localOnlyMcp` in config.json. A chat moved with that work would stop on the remote.
+- With claude-swap on both machines, the recorder keeps the remote on this Mac's active account, or one of the same organization, and leaves it alone when it has neither. A chat moved there ran on whatever account the remote last had, another organization's limits included. An account counts only when its email matches.
+
 - A chat that compaction carries into a new transcript, or that /clear restarts, is no longer offered as closed. Restore keyed chats by id, and Bring back would have reopened the old copy beside the live one.
 
 - A chat renamed with /rename on the remote keeps working from the window: its tmux session is renamed to match, so Reply, the screen preview and `offload attach` find it.

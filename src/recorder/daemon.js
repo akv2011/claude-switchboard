@@ -221,6 +221,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         .then((api) => api.autoBalanceTick({ notify: defaultNotify, say: log }))
         .catch((err) => log(`auto-balance failed: ${err.message}`));
     }
+    // Chats on the remote run on this Mac's Claude account, as chats here do (remote-account.js).
+    import('../core/remote-account.js')
+      .then((m) => m.followLocalAccount({ say: log }))
+      .catch((err) => log(`remote account failed: ${err.message}`));
   } else {
     run();
   }
