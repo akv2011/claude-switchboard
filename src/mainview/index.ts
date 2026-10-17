@@ -1537,12 +1537,18 @@ function renderBatch() {
   const scope = chosen.length ? chosen : allSessions().filter(inView);
   // Ticked chats on the restore offer come back through it: each on the machine
   // it ran on, folders in the offer's order, chats in the order they were open.
+  // The rest come back after them, folder by folder, each on the machine it last ran on,
+  // so every ticked chat is in every count ("4 selected" offered 1 and 3 before).
   const offer = chosen.length ? offerGroups().map((g) => ({ ...g, sessions: g.sessions.filter((s) => picked.has(s.sessionId)) })).filter((g) => g.sessions.length) : [];
   const offered = new Set(offer.flatMap((g) => g.sessions.map((s) => s.sessionId)));
-  const back = offered.size;
   const toMove = scope.filter(movable);
   const busy = scope.filter(working).length;
-  const stopped = startable(sortSessions(scope)).filter((s) => !offered.has(s.sessionId));
+  const stopped = startable(sortSessions(scope));
+  const rest = chosen.length ? stopped.filter((s) => !offered.has(s.sessionId)) : [];
+  const byCwd = new Map<string, Session[]>();
+  for (const s of rest) (byCwd.get(s.cwd!) ?? byCwd.set(s.cwd!, []).get(s.cwd!)!).push({ ...s, machine: s.lastMachine ?? 'mac' });
+  const backGroups: OfferGroup[] = [...offer, ...[...byCwd].map(([cwd, sessions]) => ({ cwd, sessions, lastSeen: null }))];
+  const back = offered.size + rest.length;
   const remoteUp = hasRemote() && state!.remote.reachable;
   const fits = stopped.length && stopped.length <= BATCH_START_MAX;
   const parts = [
@@ -1566,7 +1572,7 @@ function renderBatch() {
     const b = document.getElementById(id) as HTMLButtonElement | null;
     if (b) b.onclick = async () => { b.disabled = true; await fn(); for (const s of list) picked.delete(s.sessionId); if (chosen.length) pickChanged(); };
   };
-  on('batch-back', chosen.filter((s) => offered.has(s.sessionId)), () => bringBack(offer));
+  on('batch-back', [...chosen.filter((s) => offered.has(s.sessionId)), ...rest], () => bringBack(backGroups));
   on('batch-move', toMove, () => batchToRemote(toMove));
   on('batch-start-remote', stopped, () => batchToRemote(stopped));
   on('batch-open-mac', stopped, () => batchOpenOnMac(stopped));
