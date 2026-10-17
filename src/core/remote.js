@@ -74,6 +74,22 @@ for h in /sys/class/hwmon/hwmon*; do
   case "$(cat "$h/name" 2>/dev/null)" in k10temp|coretemp) echo "TEMP:$(( $(cat "$h/temp1_input") / 1000 ))"; break ;; esac
 done
 echo "PSWPOUT:$(awk '/^pswpout /{print $2}' /proc/vmstat)"
+# A chat renamed with /rename keeps the tmux session named at launch, and every
+# control here and \`offload attach\` find a chat by its name: rename the session
+# to match. Only sessions offload started a chat in (claude --name or --resume),
+# never an offload -d job. Needs jq on the remote; without it nothing is renamed.
+command -v jq >/dev/null && tmux list-panes -a -F '#{pane_pid} #{session_name} #{pane_start_command}' 2>/dev/null | while read -r pane sess cmd; do
+  case $cmd in *"claude --name"*|*"claude --resume"*) ;; *) continue ;; esac
+  for f in "$HOME"/.claude/sessions/*.json; do
+    [ -f "$f" ] || continue
+    p=$(basename "$f" .json)
+    # zsh -lc execs claude, so the chat is usually the pane's own process.
+    [ "$p" = "$pane" ] || [ "$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')" = "$pane" ] || continue
+    want=$(jq -j '.name // empty' "$f" 2>/dev/null | tr -c 'A-Za-z0-9_-' '_' | cut -c1-50)
+    [ -n "$want" ] && [ "$want" != "$sess" ] && ! tmux has-session -t "=$want" 2>/dev/null &&
+      tmux rename-session -t "=$sess" "$want"
+  done
+done
 echo "---TMUX---"
 tmux ls -F "#{session_name}" 2>/dev/null
 echo "---PS---"

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A chat renamed with /rename on the remote keeps working from the window: its tmux session is renamed to match, so Reply, the screen preview and `offload attach` find it.
+
 - A chat that stops while others keep running in its folder stays on the restore offer. It was offered for one 30-second poll, then dropped.
 - The sidebar groups chats by name: a group picked by hand (drag a chat onto it, or choose one in the detail panel), else the prefix before the first "_", else the folder. Groups made by hand are kept in `~/.claude-switchboard/groups.json`. Grouping by the folders a chat's work touched split one body of work across several folders.
 - A Folders tree files each chat under the VS Code window it runs in, else the projects root (`projectsRoots`) that holds it. Projects roots come first and start open.
