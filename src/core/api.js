@@ -92,6 +92,11 @@ export function getOverview(options = {}) {
   for (const id of inFlight()) running.add(id);
   const groups = restorableWorkspaces(snapshot, undefined, running, transcriptIds);
   const offered = groups.flatMap((g) => g.sessions);
+  // The snapshot keeps the name a chat had while it ran, which for an unnamed one is
+  // what Claude Code made from the folder; the list shows its title. Use the list's,
+  // for the banner and the terminal tab both.
+  const byId = new Map(sessions.map((s) => [s.sessionId, s]));
+  for (const s of offered) if (byId.get(s.sessionId)?.name) s.name = byId.get(s.sessionId).name;
   const accountsAvailable = Boolean(cswapPath());
 
   return {
