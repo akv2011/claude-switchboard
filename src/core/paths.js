@@ -75,6 +75,23 @@ export function codeBin() {
   return findBin('code') ?? (fs.existsSync(bundled) ? bundled : 'code');
 }
 
+/**
+ * The folder a chat was started in. Claude files a chat under a directory named
+ * after it, and records on every line the folder Claude is in by then, which
+ * follows its own `cd`s, so a chat started in its VS Code window's folder can
+ * read as started in a subfolder. The name cannot be decoded, so walk up from each
+ * recorded folder to the one that encodes to it (Claude's rule: every character
+ * but a letter or digit becomes "-"). Null when none does.
+ */
+export function startFolder(projectDir, cwds) {
+  for (const c of cwds) {
+    for (let p = c; p && p !== path.dirname(p); p = path.dirname(p)) {
+      if (p.replace(/[^A-Za-z0-9]/g, '-') === projectDir) return p;
+    }
+  }
+  return null;
+}
+
 /** Transcript path for a session inside an already known project directory. */
 export function transcriptPath(projectDir, sessionId) {
   return path.join(PROJECTS_DIR, projectDir, `${sessionId}.jsonl`);
