@@ -16,7 +16,7 @@ Two parts:
 - "Needs you" means the chat is idle and its last reply asks something, or Claude Code reports it waiting at a prompt. A working chat never counts.
 - Chats that stopped on a usage limit or an API error are marked, with the reset time and a Continue button.
 - Background agents (`claude --bg`) that are blocked on you are listed at the top.
-- Families: chats named with a shared prefix (`api_sync`, `api_ui`, `api_seo`) group together. Chats that reuse one name fold under a single row, each copy labelled (current, latest, part of a continued chat, branch, older copy).
+- Groups: chats named with a shared prefix (`api_sync`, `api_ui`, `api_seo`) group together in the sidebar; drag a chat onto another group to refile it. A folder tree files each chat under the VS Code window it runs in. Chats that reuse one name fold under a single row, each copy labelled (current, latest, part of a continued chat, branch, older copy).
 - Chats started in a folder that holds many projects are filed under the project their work actually touches.
 - Full-text search: type, then press Enter to search what was written and replied in every chat.
 
@@ -77,7 +77,7 @@ A chat running on the second machine, with its live terminal screen refreshed ev
 git clone https://github.com/akv2011/claude-switchboard.git
 cd claude-switchboard
 bun install
-npm test                 # node --test, 167 tests, no network
+npm test                 # node --test, 175 tests, no network
 npm run bridge           # packages and installs the VS Code extension
 bun run gui              # builds build/stable-macos-arm64/Claude Switchboard.app
 scripts/install.sh       # copies the app to /Applications, installs the recorder, opens it

@@ -3,6 +3,12 @@
 ## Unreleased
 
 - A chat that stops while others keep running in its folder stays on the restore offer. It was offered for one 30-second poll, then dropped.
+- The sidebar groups chats by name: a group picked by hand (drag a chat onto it, or choose one in the detail panel), else the prefix before the first "_", else the folder. Groups made by hand are kept in `~/.claude-switchboard/groups.json`. Grouping by the folders a chat's work touched split one body of work across several folders.
+- A Folders tree files each chat under the VS Code window it runs in, else the projects root (`projectsRoots`) that holds it. Projects roots come first and start open.
+- Tick boxes on rows, groups and folders, with a bar that brings back, moves, opens or regroups the ticked chats. Shift ticks a range; Space ticks the focused row; Esc clears.
+- The restore offer has a tick per chat, so a few can be left out; the rest come back in the order they were open.
+- An application menu. Without one, macOS never sent Cmd+= to the window, and copy and paste did nothing in the search box. View has Zoom In, Zoom Out and Actual Size (Cmd+=, Cmd+-, Cmd+0); the level is remembered.
+- Bigger sidebar and list text, list columns that fit from 800 px, row buttons that no longer cover the size column, and a delete that keeps the list where it was and focus on the next row.
 
 ## 1.0.1
 

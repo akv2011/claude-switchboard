@@ -29,16 +29,17 @@ if (!mock) {
       // A move syncs the project first; a big folder takes minutes, and a
       // timed-out request left the window silent while the move went on.
       maxRequestTime: 600_000,
-      handlers: { requests: {}, messages: {} },
+      handlers: { requests: {}, messages: { zoom: ({ step }: { step: number }) => stepZoom(step) } },
     }),
   });
 }
 
 const call = (name: string, payload: unknown = {}) => {
   if (mock) {
-    // The harness may supply canned replies for other requests too.
+    // The harness may supply canned replies for other requests too, or a function that answers them.
     const canned = (mock as any).__rpc?.[name];
-    return Promise.resolve(name === 'overview' ? mock : canned ?? { ok: false, error: 'not available in the harness' });
+    return Promise.resolve(name === 'overview' ? mock
+      : typeof canned === 'function' ? canned(payload) : canned ?? { ok: false, error: 'not available in the harness' });
   }
   return askAgainOnTimeout(name, () => (electroview!.rpc as any).request[name](payload));
 };
@@ -54,7 +55,7 @@ type Session = {
   live: boolean; pid: number | null; status: string | null; transcriptMissing?: boolean;
   machine: Machine; lastMachine: Machine; lastLine: string | null; needsYou: boolean;
   contextPct: number | null; permission: string | null; permissionMode?: string | null; rssMb: number | null;
-  family?: string; parentSessionId?: string | null;
+  group: string; autoGroup: string; groupFrom: 'pick' | 'prefix' | 'folder'; root: string; parentSessionId?: string | null;
   stoppedOn?: { kind: 'limit' | 'error'; text: string; at: string | null } | null; quietMin?: number | null;
   sameNameCount?: number; sameNameRank?: number; sameNamePrimaryId?: string;
   sameNameRole?: 'running' | 'latest' | 'also-running' | 'part' | 'branch' | 'older';
@@ -77,11 +78,13 @@ type Usage = { slot: number; active: boolean; stale: boolean; failing: boolean;
   fiveHour: { pct: number; resetsAt: string | null } | null; sevenDay: { pct: number; resetsAt: string | null } | null };
 type Agent = { id: string; name: string; cwd: string | null; sessionId: string | null; needs: string | null; detail: string | null;
   suggestedReply: string | null; updatedAt: number | null; stale: boolean };
-type State = { home: string; projects: Project[]; totals: any; restore: any; recorder: any; remote: Remote; mac: Mac;
+type State = { home: string; projects: Project[]; groups: string[]; projectsRoots: string[]; totals: any; restore: any; recorder: any; remote: Remote; mac: Mac;
   accounts: { available: boolean }; usage: Usage[]; background: Agent[]; autoTasks: any; persistence: any; configErrors: string[] };
+/** One folder of the restore offer: its chats in the order they were open. */
+type OfferGroup = { cwd: string; sessions: Session[]; lastSeen: number | null };
 
-/** What the list shows. A view is a filter; a project is a scope. */
-type View = { kind: 'all' | 'needs' | 'running' | 'stopped' | 'machine' | 'project' | 'family'; value?: string; scope?: string };
+/** What the list shows. A view is a filter; a root folder is a scope, and a group may be one inside a root. */
+type View = { kind: 'all' | 'needs' | 'running' | 'stopped' | 'machine' | 'root' | 'group'; value?: string; root?: string };
 
 let state: State | null = null;
 let view: View = { kind: 'all' };
@@ -108,6 +111,10 @@ const navClosed = new Set<string>();
 const saveNavOpen = () => { try { localStorage.setItem('switchboard.nav.open', JSON.stringify([...navOpen])); } catch { /* not remembered */ } };
 /** Same-name groups unfolded in the list, keyed by the primary chat's id. */
 const unfolded = new Set<string>();
+/** Chats ticked for a batch action, by id, so a refresh keeps them. Not the one open in the detail panel. */
+const picked = new Set<string>();
+/** Offer chats left unticked; the rest of the offer comes back. */
+const offerSkip = new Set<string>();
 /** Model and effort shared by most listed chats; rows show theirs only when it differs. */
 let commonModel = '';
 
@@ -159,6 +166,12 @@ function toast(message: string, kind: 'ok' | 'error' = 'ok') {
 /* ---------- derived ---------- */
 
 const allSessions = () => state!.projects.flatMap((p) => p.sessions);
+const sessionOf = (id: string) => allSessions().find((s) => s.sessionId === id);
+const offerGroups = () => state!.restore.groups as OfferGroup[];
+
+/** Every group, alphabetical so lines never jump when a chat starts or stops; created ones show while empty. */
+const groupNames = () => [...new Set([...(state!.groups ?? []), ...allSessions().map((s) => s.group)])]
+  .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
 
 /** The remote machine's name on screen, from config.json. */
 const R = () => state?.remote?.label ?? 'Remote';
@@ -187,17 +200,8 @@ function inView(s: Session) {
     case 'running': return s.live;
     case 'stopped': return !s.live;
     case 'machine': return s.live ? s.machine === view.value : s.lastMachine === view.value;
-    case 'project': {
-      const project = state!.projects.find((p) => p.label === view.value);
-      return Boolean(project?.allSessions.some((x) => x.sessionId === s.sessionId));
-    }
-    case 'family': {
-      if (s.family !== view.value) return false;
-      // A family clicked under a project means its chats in that project.
-      const project = view.scope ? state!.projects.find((p) => p.label === view.scope) : null;
-      // Its own chats, as the tree line counts them; subprojects list theirs under themselves.
-      return !project || project.sessions.some((x) => x.sessionId === s.sessionId);
-    }
+    case 'root': return s.root === view.value;
+    case 'group': return s.group === view.value && (view.root === undefined || s.root === view.root);
   }
 }
 
@@ -218,8 +222,8 @@ function viewTitle() {
     case 'running': return 'Running';
     case 'stopped': return 'Stopped';
     case 'machine': return view.value === 'remote' ? `On ${R()}` : 'On the Mac';
-    case 'project': return shortPath(view.value!);
-    case 'family': return view.scope ? `${view.value} chats in ${baseName(view.scope)}` : `${view.value} chats`;
+    case 'root': return shortPath(view.value!) || 'No folder';
+    case 'group': return view.root === undefined ? view.value! : `${view.value} in ${rootText(view.root)}`;
   }
 }
 
@@ -325,17 +329,15 @@ function renderMachines() {
       const scope = e.dataTransfer?.getData('text/scope');
       if (scope) {
         if (card.dataset.machine !== 'remote') { toast(`Groups move to ${R()}; drop them on its card.`); return; }
-        const { kind, value, scope: within } = JSON.parse(scope) as { kind: 'project' | 'family'; value: string; scope?: string };
-        const project = state!.projects.find((p) => p.label === (kind === 'project' ? value : within));
-        const members = kind === 'family' ? (project?.allSessions ?? allSessions()).filter((s) => s.family === value) : project?.allSessions ?? [];
+        const { kind, value, root } = JSON.parse(scope) as { kind: 'root' | 'group'; value: string; root?: string };
+        const members = allSessions().filter((s) => (kind === 'root' ? s.root === value : s.group === value && (root === undefined || s.root === root)));
         const list = members.filter(movable);
-        const label = kind === 'family' ? value : shortPath(value);
+        const label = kind === 'root' ? shortPath(value) : root === undefined ? value : `${value} in ${rootText(root)}`;
         if (!list.length) toast(`Nothing in ${label} to move: none of its chats is open and idle on the Mac.`);
         else confirmBox(`Move ${list.length} idle chat${list.length === 1 ? '' : 's'} from ${label} to ${R()}?`, `Each one closes here and reopens in its own VS Code terminal, running on ${R()}.`, () => batchToRemote(list), 'Move them');
         return;
       }
-      const id = e.dataTransfer?.getData('text/session-id');
-      const s = id ? sessionById.get(id) : null;
+      const s = sessionOf(e.dataTransfer?.getData('text/session-id') ?? '');
       if (s) moveFlow(s, card.dataset.machine as 'mac' | 'remote');
     });
   }
@@ -434,6 +436,8 @@ async function openDetail(s: Session) {
       <div class="d-title"><div class="d-name">${escapeHtml(s.name)}</div><div class="d-meta">${meta}</div><div class="d-sub" title="${escapeHtml(s.cwd ?? '')}">${escapeHtml(shortPath(s.cwd))}</div></div>
       <button class="d-close" type="button" aria-label="Close details">&#x2715;</button>
     </header>
+    <label class="d-group"><span>Group</span><select id="d-group"><option value="">Automatic, ${escapeHtml(s.autoGroup)}</option>${
+      groupNames().filter((g) => g !== s.autoGroup).map((g) => `<option value="${escapeHtml(g)}"${g === s.group ? ' selected' : ''}>${escapeHtml(g)}</option>`).join('')}</select></label>
     ${s.live && s.stoppedOn ? `<p class="d-stop" data-kind="${s.stoppedOn.kind}">${s.stoppedOn.kind === 'limit' ? 'It stopped on a usage limit' : 'It stopped on an API error'}: ${escapeHtml(s.stoppedOn.text)}. ${s.stoppedOn.kind === 'limit' ? 'Wait for the reset or switch accounts, then Continue.' : 'Continue retries.'}</p>` : ''}
     ${s.quietMin ? `<p class="d-note">No new output for ${s.quietMin} minutes while working. A long command does this; if it should not, interrupt it.</p>` : ''}
     ${remoteDown(s) ? `<p class="d-offline">${escapeHtml(R())} is not answering, so this chat cannot be reached from here. What you see is from when it was last seen.</p>` : ''}
@@ -445,6 +449,8 @@ async function openDetail(s: Session) {
     ${sameNameSection(s)}
     `;
   (d.querySelector('.d-close') as HTMLButtonElement).onclick = closeDetail;
+  const groupSelect = d.querySelector('#d-group') as HTMLSelectElement;
+  groupSelect.onchange = () => fileUnder([s], groupSelect.value || s.autoGroup);
   d.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((b) => {
     const copy = allSessions().find((x) => x.sessionId === b.dataset.copy);
     if (!copy) return;
@@ -523,20 +529,34 @@ async function detailAction(s: Session, act: string, button: HTMLButtonElement) 
 
 /* ---------- nav ---------- */
 
-function navItem(label: string, count: string, current: boolean, onClick: () => void, extra: Partial<{ depth: number; title: string; countClass: string }> = {}) {
+function navItem(label: string, count: string, current: boolean, onClick: () => void, extra: Partial<{ depth: number; title: string; countClass: string; focusKey: string }> = {}) {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'nav-item';
   b.setAttribute('aria-current', String(current));
   if (extra.depth) b.dataset.depth = String(extra.depth);
   if (extra.title) b.title = extra.title;
+  // A re-render puts keyboard focus back on the line that had it.
+  if (extra.focusKey) b.dataset.focusKey = extra.focusKey;
   b.innerHTML = `<span class="nav-label">${label}</span><span class="nav-count ${extra.countClass ?? ''}">${count}</span>`;
   b.onclick = onClick;
   return b;
 }
 
+const isOpen = (key: string, current: boolean) => navOpen.has(key) || (current && !navClosed.has(key));
+/** Open unless closed by hand; the closing is what is remembered. */
+const openByDefault = (key: string) => !navOpen.has(`x:${key}`);
+
+/** Toggles what is shown, whichever rule opened it: a line opened because it holds the current view used to reopen on every click. */
+function toggleOpen(key: string, open: boolean, byDefault = false) {
+  if (byDefault) { if (open) navOpen.add(`x:${key}`); else navOpen.delete(`x:${key}`); }
+  else if (open) { navOpen.delete(key); navClosed.add(key); } else { navOpen.add(key); navClosed.delete(key); }
+  saveNavOpen();
+  renderNav();
+}
+
 /** A disclosure triangle in front of a nav item; null key means nothing to open. */
-function withChevron(item: HTMLElement, key: string | null, open = key ? navOpen.has(key) : false) {
+function withChevron(item: HTMLElement, key: string | null, open = key ? navOpen.has(key) : false, byDefault = false) {
   const wrap = document.createElement('div');
   wrap.className = 'nav-line';
   const chev = document.createElement('button');
@@ -545,13 +565,8 @@ function withChevron(item: HTMLElement, key: string | null, open = key ? navOpen
   if (key) {
     chev.setAttribute('aria-expanded', String(open));
     chev.setAttribute('aria-label', open ? 'Collapse' : 'Expand');
-    // Toggles what is shown, whichever rule opened it: a group opened because it
-    // holds the current view used to reopen on every click.
-    chev.onclick = () => {
-      if (open) { navOpen.delete(key); navClosed.add(key); } else { navOpen.add(key); navClosed.delete(key); }
-      saveNavOpen();
-      renderNav();
-    };
+    chev.dataset.focusKey = `chev:${key}`;
+    chev.onclick = () => toggleOpen(key, open, byDefault);
   } else {
     chev.disabled = true;
     chev.setAttribute('aria-hidden', 'true');
@@ -561,9 +576,9 @@ function withChevron(item: HTMLElement, key: string | null, open = key ? navOpen
   return wrap;
 }
 
-/** "Shop_Crawl" shown under the Shop family as "Crawl". */
-const baseNameOf = (name: string, family: string) =>
-  (name.toLowerCase().startsWith(`${family.toLowerCase()}_`) ? name.slice(family.length + 1) : name) || name;
+/** "Shop_Crawl" shown under the Shop group as "Crawl". */
+const baseNameOf = (name: string, group: string) =>
+  (name.toLowerCase().startsWith(`${group.toLowerCase()}_`) ? name.slice(group.length + 1) : name) || name;
 
 /** Status of a group in one mark: amber when a chat needs you, blue when any run, nothing otherwise. */
 function groupDot(list: Session[]) {
@@ -577,98 +592,294 @@ function groupTitle(label: string, list: Session[]) {
   return `${label}\n${n(list.length)} chats${live ? `, ${live} running` : ''}${needs ? `, ${needs} need you` : ''}`;
 }
 
-/**
- * The sidebar's one tree: project, then the families inside it, then chats.
- * A project lists its own families and its loose chats (the six most recent,
- * then a "more" line), then its subprojects. Everything opens under a chevron
- * and is remembered; whatever is the current view stays open.
- */
-function renderTree(is: (kind: View['kind'], value?: string) => boolean) {
-  const host = $('projects');
-  host.innerHTML = '';
-  const projects = state!.projects.filter((p) => !baseName(p.label).startsWith('.'));
-  const byLabel = new Map(projects.map((p) => [p.label, p]));
-  const childrenOf = new Map<string, Project[]>();
-  for (const p of projects) if (p.parent && byLabel.has(p.parent)) (childrenOf.get(p.parent) ?? childrenOf.set(p.parent, []).get(p.parent)!).push(p);
-  const selected = selectedId ? allSessions().find((s) => s.sessionId === selectedId) : null;
-  const holdsView = (p: Project) => (view.kind === 'project' && (view.value === p.label || String(view.value).startsWith(`${p.label}/`)))
-    || (view.kind === 'family' && (view.scope === p.label || String(view.scope).startsWith(`${p.label}/`)))
-    || Boolean(selected && p.allSessions.includes(selected));
-  const isOpen = (key: string, current: boolean) => navOpen.has(key) || (current && !navClosed.has(key));
+/** Lets a chat be dropped on `el`, from a list row or a sidebar line. */
+function acceptChats(el: HTMLElement, onDrop: (s: Session) => void) {
+  const carriesChat = (e: DragEvent) => Boolean(e.dataTransfer?.types.includes('text/session-id'));
+  el.addEventListener('dragover', (e) => { if (!carriesChat(e)) return; e.preventDefault(); el.classList.add('is-drop'); });
+  el.addEventListener('dragleave', (e) => { if (!el.contains(e.relatedTarget as Node)) el.classList.remove('is-drop'); });
+  el.addEventListener('drop', (e) => {
+    el.classList.remove('is-drop');
+    const s = sessionOf(e.dataTransfer?.getData('text/session-id') ?? '');
+    if (!s) return;
+    e.preventDefault();
+    onDrop(s);
+  });
+}
 
-  const line = (depth: number, item: HTMLElement, key: string | null, open = false) => {
-    const row = withChevron(item, key, open);
-    row.style.setProperty('--depth', String(depth));
-    return row;
+/** A dragged chat that is ticked brings the other ticked chats with it. */
+const withPicked = (s: Session) => (picked.has(s.sessionId) && picked.size > 1 ? allSessions().filter((x) => picked.has(x.sessionId)) : [s]);
+
+/**
+ * File chats under a group. One whose automatic group that is goes back to
+ * automatic instead, so groups.json holds only what was picked by hand.
+ */
+async function fileUnder(list: Session[], group: string) {
+  const moving = list.filter((s) => s.group !== group);
+  if (!moving.length) { toast(list.length === 1 ? `${list[0].name} is already in ${group}.` : `Those chats are already in ${group}.`); return; }
+  const back = [...new Set(moving.filter((s) => s.autoGroup === group).map((s) => s.name))];
+  const chosen = [...new Set(moving.filter((s) => s.autoGroup !== group).map((s) => s.name))];
+  for (const [names, to] of [[back, null], [chosen, group]] as Array<[string[], string | null]>) {
+    if (!names.length) continue;
+    const r = await call('assignGroup', { names, group: to });
+    if (!r.ok) { toast(r.error, 'error'); return; }
+  }
+  toast(moving.length === 1 ? `Moved ${moving[0].name} to ${group}.` : `Moved ${moving.length} chats to ${group}.`);
+  lastFingerprint = '';
+  await refresh();
+}
+
+/** A checkbox in a 24 px target that ticks or unticks every chat in `list`. */
+function pickBox(list: Session[], label: string, focusKey: string) {
+  const box = document.createElement('label');
+  box.className = 'pick';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.dataset.focusKey = focusKey;
+  input.setAttribute('aria-label', label);
+  const ticked = list.filter((s) => picked.has(s.sessionId)).length;
+  input.checked = list.length > 0 && ticked === list.length;
+  input.indeterminate = ticked > 0 && ticked < list.length;
+  input.disabled = !list.length;
+  input.onchange = () => {
+    for (const s of list) if (input.checked) picked.add(s.sessionId); else picked.delete(s.sessionId);
+    pickChanged();
   };
-  const chatLine = (s: Session, depth: number, family?: string) => {
+  box.append(input);
+  return box;
+}
+
+/** A chat in the sidebar, under its group or loose in a folder, dragged like a list row. */
+function chatLine(s: Session, group: string, depth: number, focusAs: string) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = `nav-chat${s.live ? ' is-live' : ''}${s.needsYou ? ' is-needs' : ''}`;
+  b.dataset.machine = s.machine ?? '';
+  b.dataset.focusKey = `${focusAs}:${s.sessionId}`;
+  b.draggable = true;
+  b.setAttribute('aria-current', String(selectedId === s.sessionId));
+  const word = s.needsYou ? 'Needs you' : s.live ? (s.machine === 'remote' ? R() : stateWord(s)) : '';
+  b.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="nav-label">${escapeHtml(baseNameOf(s.name, group))}</span>${word ? `<span class="nav-state">${escapeHtml(word)}</span>` : ''}`;
+  b.title = `${s.name}, ${stateWord(s).toLowerCase()}${s.machine ? ` on ${s.machine === 'remote' ? R() : 'the Mac'}` : ''}`;
+  b.onclick = () => { const x = sessionOf(s.sessionId); if (x) { sessionById.set(x.sessionId, x); openDetail(x); renderNav(); } };
+  b.addEventListener('dragstart', (e) => { e.dataTransfer?.setData('text/session-id', s.sessionId); });
+  const wrap = document.createElement('div');
+  wrap.className = 'nav-line is-chat';
+  wrap.style.setProperty('--depth', String(depth));
+  const spacer = document.createElement('span');
+  spacer.className = 'nav-chev is-blank';
+  spacer.setAttribute('aria-hidden', 'true');
+  wrap.append(spacer, b);
+  return wrap;
+}
+
+let creatingGroup = false;
+let groupDraft = '';
+/** A chat dropped on "New group", filed under it once the name is typed. */
+let newGroupFor: Session | null = null;
+/** The line, flat or in a folder, whose delete is being confirmed. */
+let confirmingDelete: string | null = null;
+
+function cancelNewGroup() {
+  creatingGroup = false;
+  groupDraft = '';
+  newGroupFor = null;
+  renderNav();
+}
+
+async function submitNewGroup(name: string) {
+  const r = await call('createGroup', { name });
+  if (!r.ok) { toast(r.error, 'error'); return; }
+  const s = newGroupFor;
+  cancelNewGroup();
+  navOpen.add(`g:${r.name}`);
+  saveNavOpen();
+  if (s) { await fileUnder(withPicked(s), r.name); return; }
+  toast(`Created ${r.name}. Drag chats onto it, or tick them and use Move to group.`);
+  lastFingerprint = '';
+  await refresh();
+}
+
+function newGroupLine() {
+  const line = document.createElement('div');
+  line.className = 'nav-line nav-new';
+  if (!creatingGroup) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = `nav-chat${s.live ? ' is-live' : ''}${s.needsYou ? ' is-needs' : ''}`;
-    b.dataset.machine = s.machine ?? '';
-    b.setAttribute('aria-current', String(selectedId === s.sessionId));
-    const word = s.needsYou ? 'Needs you' : s.live ? (s.machine === 'remote' ? R() : stateWord(s)) : '';
-    b.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="nav-label">${escapeHtml(family ? baseNameOf(s.name, family) : s.name)}</span>${word ? `<span class="nav-state">${escapeHtml(word)}</span>` : ''}`;
-    b.title = `${s.name}, ${stateWord(s).toLowerCase()}${s.machine ? ` on ${s.machine === 'remote' ? R() : 'the Mac'}` : ''}`;
-    b.onclick = () => { const x = allSessions().find((y) => y.sessionId === s.sessionId); if (x) { sessionById.set(x.sessionId, x); openDetail(x); renderNav(); } };
-    const wrap = document.createElement('div');
-    wrap.className = 'nav-line';
-    wrap.style.setProperty('--depth', String(depth));
-    const spacer = document.createElement('span');
-    spacer.className = 'nav-chev is-blank';
-    spacer.setAttribute('aria-hidden', 'true');
-    wrap.append(spacer, b);
-    return wrap;
+    b.className = 'nav-item nav-add';
+    b.dataset.focusKey = 'new-group';
+    b.title = 'Create a group. Dropping a chat here starts one with it.';
+    b.innerHTML = '<span class="nav-label">New group</span>';
+    b.onclick = () => { creatingGroup = true; renderNav(); document.getElementById('new-group')?.focus(); };
+    line.append(b);
+    acceptChats(line, (s) => { newGroupFor = s; creatingGroup = true; renderNav(); document.getElementById('new-group')?.focus(); });
+    return line;
+  }
+  const input = document.createElement('input');
+  input.id = 'new-group';
+  input.className = 'nav-input';
+  input.type = 'text';
+  input.maxLength = 40;
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.dataset.focusKey = 'new-group-input';
+  input.placeholder = 'Group name…';
+  input.setAttribute('aria-label', newGroupFor ? `Name a new group for ${newGroupFor.name}` : 'Name a new group');
+  input.value = groupDraft;
+  input.oninput = () => { groupDraft = input.value; };
+  input.onkeydown = (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); cancelNewGroup(); }
+    if (e.key === 'Enter') { e.preventDefault(); submitNewGroup(input.value); }
   };
+  line.append(input);
+  if (newGroupFor) {
+    const note = document.createElement('span');
+    note.className = 'nav-note';
+    note.textContent = `Enter files ${newGroupFor.name} under it, Esc cancels`;
+    line.append(note);
+  }
+  return line;
+}
 
-  const place = (p: Project, depth: number) => {
-    const own = p.sessions.filter((s) => !s.sameNameRank);
-    const families = new Map<string, Session[]>();
-    for (const s of own) if (s.family) (families.get(s.family) ?? families.set(s.family, []).get(s.family)!).push(s);
-    const loose = sortSessions(own.filter((s) => !s.family || (families.get(s.family)?.length ?? 0) < 2));
-    for (const [f, list] of families) if (list.length < 2) families.delete(f);
-    const kids = childrenOf.get(p.label) ?? [];
-    const key = `p:${p.label}`;
-    const open = isOpen(key, holdsView(p));
+/** The inline confirm under the group line `key`. */
+function deleteLine(name: string, list: Session[], key: string) {
+  const el = document.createElement('div');
+  el.className = 'nav-confirm';
+  el.setAttribute('role', 'group');
+  el.setAttribute('aria-label', `Delete ${name}?`);
+  const filed = list.filter((s) => s.autoGroup !== name).length;
+  el.innerHTML = `<span>Delete ${escapeHtml(name)}?${filed ? ` ${filed} chat${filed === 1 ? '' : 's'} go${filed === 1 ? 'es' : ''} back to ${filed === 1 ? 'its' : 'their'} automatic group.` : ''}</span>
+    <span class="nav-confirm-row"><button class="btn btn-ghost" type="button" data-do="cancel">Cancel</button><button class="btn btn-danger" type="button" data-do="delete" data-focus-key="del-confirm">Delete</button></span>`;
+  (el.querySelector('[data-do="cancel"]') as HTMLButtonElement).onclick = () => {
+    confirmingDelete = null;
+    renderNav();
+    document.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(`del:${key}`)}"]`)?.focus();
+  };
+  (el.querySelector('[data-do="delete"]') as HTMLButtonElement).onclick = async () => {
+    const r = await call('deleteGroup', { name });
+    confirmingDelete = null;
+    toast(r.ok ? `Deleted ${name}.${filed ? ' Its chats are back in their automatic groups.' : ''}` : r.error, r.ok ? 'ok' : 'error');
+    if (view.kind === 'group' && view.value === name) view = { kind: 'all' };
+    lastFingerprint = '';
+    await refresh();
+  };
+  return el;
+}
 
-    const short = shortPath(p.label);
-    const segments = p.cwd ? short.split('/').filter(Boolean) : [];
-    let base = p.cwd ? escapeHtml(segments.pop() ?? p.label) : 'Unknown folder';
-    let parent = p.cwd && depth === 0 && segments.length ? `<span class="nav-parent">${escapeHtml(segments.pop()!)}/</span>` : '';
-    if (short.startsWith('~/.claude/')) { parent = '<span class="nav-parent">.claude/</span>'; base = escapeHtml(baseName(p.label)); }
-    const item = navItem(`${groupDot(p.allSessions)}${parent}${base}`, n(p.allSessions.length), is('project', p.label),
-      () => setView({ kind: 'project', value: p.label }), { title: groupTitle(p.label, p.allSessions) });
+/**
+ * The sidebar's main list: every group, alphabetical, each opening under a
+ * chevron to its chats (one per name, as the list folds them). A group by
+ * name gathers a family the folder tree split across folders.
+ */
+function renderGroups() {
+  const host = $('groups');
+  host.innerHTML = '';
+  const all = allSessions();
+  const selected = selectedId ? sessionOf(selectedId) : null;
+  for (const name of groupNames()) {
+    const list = all.filter((s) => s.group === name);
+    const shown = list.filter((s) => !s.sameNameRank)
+      .sort((a, b) => baseNameOf(a.name, name).localeCompare(baseNameOf(b.name, name), undefined, { sensitivity: 'base', numeric: true }));
+    const key = `g:${name}`;
+    const open = isOpen(key, (view.kind === 'group' && view.value === name && view.root === undefined) || selected?.group === name);
+    host.appendChild(groupLine(name, list, shown, key, open, { kind: 'group', value: name }, 0));
+    if (confirmingDelete === key) host.appendChild(deleteLine(name, list, key));
+    if (open) for (const s of shown) host.appendChild(chatLine(s, name, 0, 'chat'));
+  }
+  host.appendChild(newGroupLine());
+}
+
+/** "Desktop/Projects": the last two segments, the first one muted, as the old folder tree labelled them. */
+function rootLabel(root: string) {
+  if (!root) return 'No folder';
+  const segments = shortPath(root).split('/').filter(Boolean);
+  const base = escapeHtml(segments.pop() ?? root);
+  return segments.length ? `<span class="nav-parent">${escapeHtml(segments.pop()!)}/</span>${base}` : base;
+}
+const rootText = (root: string) => (root ? shortPath(root).split('/').filter(Boolean).slice(-2).join('/') : 'No folder');
+/** A folder of projects from config.json (projectsRoots): it leads the tree and starts open. */
+const isProjectsRoot = (root: string) => (state!.projectsRoots ?? []).includes(root);
+
+/** A drop target that files a chat under `name`, a box that ticks its chats, and a delete control when it was created by hand. */
+function groupLine(name: string, list: Session[], shown: Session[], key: string, open: boolean, view_: View, depth: number) {
+  const here = view.kind === 'group' && view.value === name && view.root === view_.root;
+  const item = navItem(`${groupDot(list)}${escapeHtml(name)}`, n(list.length), here, () => setView(view_),
+    { title: `${groupTitle(name, list)}\nDrop a chat here to file it under ${name}.${hasRemote() ? ` Drag the group onto the ${R()} card to move its idle chats.` : ''}`, focusKey: `item:${key}` });
+  item.draggable = true;
+  item.addEventListener('dragstart', (e) => { e.dataTransfer?.setData('text/scope', JSON.stringify({ kind: 'group', value: name, root: view_.root })); });
+  const line = withChevron(item, shown.length ? key : null, open);
+  line.style.setProperty('--depth', String(depth));
+  item.before(pickBox(shown, `Tick every chat in ${name}`, `pick:${key}`));
+  if ((state!.groups ?? []).includes(name)) {
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'nav-del';
+    del.dataset.focusKey = `del:${key}`;
+    del.setAttribute('aria-label', `Delete group ${name}`);
+    del.title = `Delete ${name}`;
+    del.innerHTML = '&#x2715;';
+    del.onclick = () => { confirmingDelete = key; renderNav(); document.querySelector<HTMLElement>('[data-focus-key="del-confirm"]')?.focus(); };
+    line.append(del);
+  }
+  acceptChats(line, (s) => fileUnder(withPicked(s), name));
+  return line;
+}
+
+/**
+ * The folder tree, open by default: each chat under the folder of the VS Code
+ * window it runs in (else the projects root holding it, else two levels below
+ * home), never a subfolder; inside a folder its name groups, then chats with
+ * no prefix. Projects roots lead and start open, the rest by size. Clicking a folder
+ * gives its view, which holds the folder actions (bring back, the batch buttons).
+ */
+function renderFolders() {
+  const host = $('projects');
+  const toggle = $('folders-toggle') as HTMLButtonElement;
+  const open = openByDefault('s:folders');
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.onclick = () => toggleOpen('s:folders', open, true);
+  host.hidden = !open;
+  host.innerHTML = '';
+  if (!open) return;
+  const all = allSessions();
+  const selected = selectedId ? sessionOf(selectedId) : null;
+  const byRoot = new Map<string, Session[]>();
+  for (const s of all) (byRoot.get(s.root) ?? byRoot.set(s.root, []).get(s.root)!).push(s);
+  const roots = [...byRoot.keys()].sort((a, b) => Number(isProjectsRoot(b)) - Number(isProjectsRoot(a))
+    || byRoot.get(b)!.length - byRoot.get(a)!.length || rootText(a).localeCompare(rootText(b)));
+  // A group created by hand and still empty waits under the first projects root.
+  const waiting = (state!.groups ?? []).filter((g) => !all.some((s) => s.group === g));
+  const home = roots.find(isProjectsRoot) ?? roots[0];
+  const byName = (group: string) => (a: Session, b: Session) =>
+    baseNameOf(a.name, group).localeCompare(baseNameOf(b.name, group), undefined, { sensitivity: 'base', numeric: true });
+
+  for (const root of roots) {
+    const list = byRoot.get(root)!;
+    const key = `r:${root}`;
+    const here = view.kind === 'root' && view.value === root;
+    const rootOpen = isProjectsRoot(root) ? openByDefault(key) : isOpen(key, here || (view.kind === 'group' && view.root === root) || selected?.root === root);
+    const item = navItem(`${groupDot(list)}${rootLabel(root)}`, n(list.length), here, () => setView({ kind: 'root', value: root }),
+      { title: `${groupTitle(shortPath(root) || 'No folder', list)}${hasRemote() ? `\nDrag onto the ${R()} card to move its idle chats.` : ''}`, focusKey: `item:${key}` });
     item.draggable = true;
-    item.addEventListener('dragstart', (e) => { e.dataTransfer?.setData('text/scope', JSON.stringify({ kind: 'project', value: p.label })); });
-    host.appendChild(line(depth, item, families.size || loose.length || kids.length ? key : null, open));
-    if (!open) return;
+    item.addEventListener('dragstart', (e) => { e.dataTransfer?.setData('text/scope', JSON.stringify({ kind: 'root', value: root })); });
+    const line = withChevron(item, key, rootOpen, isProjectsRoot(root));
+    item.before(pickBox(list.filter((s) => !s.sameNameRank), `Tick every chat in ${rootText(root)}`, `pick:${key}`));
+    host.appendChild(line);
+    if (!rootOpen) continue;
 
-    for (const [family, list] of [...families].sort((a, b) => Number(b[1].some((s) => s.live)) - Number(a[1].some((s) => s.live)) || a[0].localeCompare(b[0]))) {
-      const fkey = `f:${p.label}:${family}`;
-      const here = view.kind === 'family' && view.value === family && view.scope === p.label;
-      // Counted with folded same-name copies, as the list header counts them.
-      const every = p.sessions.filter((s) => s.family === family);
-      const fitem = navItem(`${groupDot(every)}${escapeHtml(family)}`, n(every.length), here,
-        () => setView({ kind: 'family', value: family, scope: p.label }), { title: `${groupTitle(`${family} chats`, list)}${hasRemote() ? `\nDrag onto the ${R()} card to move the idle ones.` : ''}` });
-      fitem.classList.add('is-family');
-      fitem.draggable = true;
-      fitem.addEventListener('dragstart', (e) => { e.dataTransfer?.setData('text/scope', JSON.stringify({ kind: 'family', value: family, scope: p.label })); });
-      const fopen = isOpen(fkey, here);
-      host.appendChild(line(depth + 1, fitem, fkey, fopen));
-      if (fopen) {
-        for (const s of sortSessions(list)) host.appendChild(chatLine(s, depth + 2, family));
-      }
+    const named = list.filter((s) => s.groupFrom !== 'folder');
+    const names = [...new Set([...named.map((s) => s.group), ...(root === home ? waiting : [])])]
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+    for (const name of names) {
+      const members = named.filter((s) => s.group === name);
+      const shown = members.filter((s) => !s.sameNameRank).sort(byName(name));
+      const gkey = `rg:${root}:${name}`;
+      const gopen = isOpen(gkey, (view.kind === 'group' && view.value === name && view.root === root) || (selected?.root === root && selected?.group === name));
+      host.appendChild(groupLine(name, members, shown, gkey, gopen, { kind: 'group', value: name, root }, 1));
+      if (confirmingDelete === gkey) host.appendChild(deleteLine(name, members, gkey));
+      if (gopen) for (const s of shown) host.appendChild(chatLine(s, name, 1, 'tchat'));
     }
-    const shown = loose.slice(0, 6);
-    for (const s of shown) host.appendChild(chatLine(s, depth + 1));
-    if (loose.length > shown.length) {
-      const more = navItem(`<span class="tdot" aria-hidden="true"></span>${n(loose.length - shown.length)} more`, '', false, () => setView({ kind: 'project', value: p.label }));
-      more.classList.add('is-more');
-      host.appendChild(line(depth + 1, more, null));
-    }
-    for (const kid of kids) place(kid, depth + 1);
-  };
-  for (const p of projects.filter((x) => !x.parent || !byLabel.has(x.parent))) place(p, 0);
+    for (const s of list.filter((x) => x.groupFrom === 'folder' && !x.sameNameRank).sort(byName(''))) host.appendChild(chatLine(s, '', 0, 'tchat'));
+  }
 }
 
 function setView(next: View) {
@@ -683,7 +894,7 @@ function setView(next: View) {
 /* ---------- row selection, drag, keyboard ---------- */
 
 $('rows').addEventListener('click', (event) => {
-  if ((event.target as HTMLElement).closest('button')) return;
+  if ((event.target as HTMLElement).closest('button, .pick')) return;
   const row = (event.target as HTMLElement).closest('.row') as HTMLElement | null;
   const s = row ? sessionById.get(row.dataset.id ?? '') : null;
   if (!s) return;
@@ -700,6 +911,49 @@ $('rows').addEventListener('dragend', (event) => {
   (event.target as HTMLElement).closest('.row')?.classList.remove('is-dragging');
 });
 
+/* ---------- ticking chats for a batch action ---------- */
+
+/** Shift held on the click or key that ticked a box: tick the range from the last one. */
+let rangeHeld = false;
+let anchorId: string | null = null;
+$('rows').addEventListener('mousedown', (event) => { rangeHeld = event.shiftKey; });
+$('rows').addEventListener('keydown', (event) => { rangeHeld = event.shiftKey; });
+$('rows').addEventListener('change', (event) => {
+  const box = event.target as HTMLInputElement;
+  const id = box.matches('.pick input') ? (box.closest('.row') as HTMLElement | null)?.dataset.id : null;
+  if (id) pick(id, box.checked, rangeHeld);
+});
+
+function pick(id: string, on: boolean, range: boolean) {
+  const ids = visibleRows().map((r) => r.dataset.id ?? '').filter(Boolean);
+  const from = range && anchorId ? ids.indexOf(anchorId) : -1;
+  const to = ids.indexOf(id);
+  for (const x of from >= 0 && to >= 0 ? ids.slice(Math.min(from, to), Math.max(from, to) + 1) : [id]) {
+    if (on) picked.add(x); else picked.delete(x);
+  }
+  anchorId = id;
+  pickChanged();
+}
+
+function clearPicks() {
+  picked.clear();
+  anchorId = null;
+  pickChanged();
+}
+
+/** Boxes follow the set in place, so a box keeps keyboard focus; the sidebar and the bar redraw. */
+function pickChanged() {
+  for (const [id, row] of rowEls) {
+    const box = row.querySelector<HTMLInputElement>('.pick input');
+    if (!box) continue;
+    box.checked = picked.has(id);
+    row.classList.toggle('is-picked', box.checked);
+  }
+  document.body.classList.toggle('has-picks', picked.size > 0);
+  renderNav();
+  renderBatch();
+}
+
 function visibleRows(): HTMLElement[] { return [...document.querySelectorAll<HTMLElement>('#rows .row')]; }
 function moveSelection(delta: number) {
   const rows = visibleRows();
@@ -711,6 +965,7 @@ function moveSelection(delta: number) {
 }
 
 function renderNav() {
+  const focused = (document.activeElement as HTMLElement | null)?.dataset?.focusKey;
   const t = state!.totals;
   const sessions = allSessions();
   const agentsWaiting = (state!.background ?? []).filter((a) => !a.stale).length;
@@ -721,13 +976,19 @@ function renderNav() {
   views.innerHTML = '';
   const is = (kind: View['kind'], value?: string) => view.kind === kind && view.value === value;
   views.append(
-    navItem('All chats', n(t.sessions), is('all'), () => setView({ kind: 'all' })),
-    navItem('Needs you', n(needs), is('needs'), () => setView({ kind: 'needs' }), { countClass: needs ? 'needs' : '' }),
-    navItem('Running', n(running), is('running'), () => setView({ kind: 'running' }), { countClass: running ? 'live' : '' }),
-    navItem('Stopped', n(t.sessions - running), is('stopped'), () => setView({ kind: 'stopped' })),
+    navItem('All chats', n(t.sessions), is('all'), () => setView({ kind: 'all' }), { focusKey: 'view:all' }),
+    navItem('Needs you', n(needs), is('needs'), () => setView({ kind: 'needs' }), { countClass: needs ? 'needs' : '', focusKey: 'view:needs' }),
+    navItem('Running', n(running), is('running'), () => setView({ kind: 'running' }), { countClass: running ? 'live' : '', focusKey: 'view:running' }),
+    navItem('Stopped', n(t.sessions - running), is('stopped'), () => setView({ kind: 'stopped' }), { focusKey: 'view:stopped' }),
   );
 
-  renderTree(is);
+  renderGroups();
+  renderFolders();
+  const back = focused ? document.querySelector<HTMLElement>(`.nav [data-focus-key="${CSS.escape(focused)}"]`) : null;
+  if (back && back !== document.activeElement) {
+    back.focus();
+    if (back instanceof HTMLInputElement && back.type === 'text') back.setSelectionRange(back.value.length, back.value.length);
+  }
 
   const hidden = t.sdkHidden ? `<br>${n(t.sdkHidden)} automated runs hidden` : '';
   // Said out loud when the bundled fonts did not load, so a fallback face is
@@ -765,7 +1026,9 @@ function ncHint() {
 
 function openNewChat() {
   const projects = state!.projects.filter((p) => p.cwd && !baseName(p.label).startsWith('.'));
-  const current = view.kind === 'project' ? view.value : view.kind === 'family' ? view.scope : null;
+  // A group's newest chat says which folder its work happens in.
+  const current = view.kind === 'root' ? view.value
+    : view.kind === 'group' ? allSessions().filter(inView).sort((a, b) => b.modifiedAt - a.modifiedAt)[0]?.cwd : null;
   ($('nc-cwd') as HTMLSelectElement).innerHTML = projects.map((p) => `<option value="${escapeHtml(p.cwd!)}"${p.cwd === current ? ' selected' : ''}>${escapeHtml(shortPath(p.cwd))}</option>`).join('');
   const usage = state!.usage ?? [];
   const active = usage.find((u) => u.active);
@@ -956,11 +1219,10 @@ function renderOffer() {
   const restore = state!.restore;
   if (!restore.count) return;
 
-  const groups = (restore.groups as Array<{ cwd: string; sessions: Session[]; lastSeen: number | null }>)
-    .filter((g) => view.kind !== 'project' || g.cwd === view.value);
+  const groups = offerGroups().filter((g) => view.kind !== 'root' || g.cwd === view.value || g.cwd.startsWith(`${view.value}/`));
   if (!groups.length) return;
   const offered = groups.flatMap((g) => g.sessions);
-  const scope = view.kind === 'project' ? view.value! : '*';
+  const scope = view.kind === 'root' ? view.value! : '*';
   const key = offerKey(scope, offered);
   if (dismissed.has(key)) return;
 
@@ -969,7 +1231,7 @@ function renderOffer() {
   const onRemote = offered.filter((s) => s.machine === 'remote').length;
   const onMac = count - onRemote;
   const unreachable = onRemote > 0 && !state!.remote.reachable;
-  const where = view.kind === 'project'
+  const where = view.kind === 'root'
     ? escapeHtml(baseName(view.value!))
     : `${groups.length} folder${groups.length === 1 ? '' : 's'}`;
   const split = onRemote
@@ -982,10 +1244,11 @@ function renderOffer() {
     <div class="offer-body">
       <div class="offer-title">${count} chat${count === 1 ? '' : 's'} closed ${ago(lastSeen)} ago in ${where}</div>
       <div class="offer-sub">${split}</div>
-      <div class="offer-names">${escapeHtml(offered.map((s) => s.name).join(', '))}</div>
+      <div class="offer-names" role="group" aria-label="Chats to bring back">${offered.map((s) => `<label class="offer-pick"><input type="checkbox" data-id="${
+        escapeHtml(s.sessionId)}"${offerSkip.has(s.sessionId) ? '' : ' checked'}><span>${escapeHtml(s.name ?? s.sessionId.slice(0, 8))}</span></label>`).join('')}</div>
     </div>
-    <button class="btn btn-primary" id="do-restore" type="button">Bring back ${count === 1 ? 'this chat' : `${count} chats`}</button>
-    <button class="btn btn-ghost" id="dismiss-restore" type="button">Dismiss</button>`;
+    <div class="offer-acts"><button class="btn btn-primary" id="do-restore" type="button"></button>
+    <button class="btn btn-ghost" id="dismiss-restore" type="button">Dismiss</button></div>`;
   host.appendChild(card);
 
   if (onMac && !state!.autoTasks?.enabled) {
@@ -1017,32 +1280,44 @@ function renderOffer() {
     };
   }
 
-  $('do-restore').onclick = async () => {
-    const button = $('do-restore') as HTMLButtonElement;
-    const label = button.textContent;
+  // In the offer's order whatever was ticked when: folders as listed, chats as they were open.
+  const chosen = () => groups.map((g) => ({ ...g, sessions: g.sessions.filter((s) => !offerSkip.has(s.sessionId)) })).filter((g) => g.sessions.length);
+  const button = $('do-restore') as HTMLButtonElement;
+  const label = () => {
+    const ticked = chosen().reduce((sum, g) => sum + g.sessions.length, 0);
+    button.textContent = ticked === count ? `Bring back ${count === 1 ? 'this chat' : `${count} chats`}` : `Bring back ${ticked} of ${count}`;
+    button.disabled = !ticked;
+  };
+  label();
+  card.querySelectorAll<HTMLInputElement>('.offer-pick input').forEach((box) => {
+    box.onchange = () => { if (box.checked) offerSkip.delete(box.dataset.id!); else offerSkip.add(box.dataset.id!); label(); };
+  });
+  button.onclick = async () => {
     button.disabled = true;
     button.textContent = 'Bringing back…';
-    const written = await call('restore', { groups, launch: true });
-    const failed = written.filter((w: any) => w.error);
-    const macFolders = written.filter((w: any) => w.machine === 'mac' && !w.error && w.via !== 'vscode').length;
-    const macChats = written.filter((w: any) => w.via === 'vscode').reduce((sum: number, w: any) => sum + (w.started ?? 0), 0);
-    const remoteStarted = written.filter((w: any) => w.machine === 'remote').reduce((sum: number, w: any) => sum + (w.started ?? 0), 0);
-    const remoteAttached = written.filter((w: any) => w.machine === 'remote').reduce((sum: number, w: any) => sum + (w.attached ?? 0), 0);
-    if (failed.length) {
-      toast(`${failed.length} part${failed.length === 1 ? '' : 's'} failed: ${failed[0].error}`, 'error');
-    } else {
-      const bits = [];
-      if (macChats) bits.push(`${macChats} chat${macChats === 1 ? '' : 's'} reopened in VS Code terminals`);
-      if (macFolders) bits.push(`VS Code is opening ${macFolders} folder${macFolders === 1 ? '' : 's'}`);
-      if (remoteStarted) bits.push(`${remoteStarted} started on ${R()}${remoteAttached ? `, ${remoteAttached} open in VS Code` : ', attach from a row'}`);
-      toast(bits.join('. ') || 'Nothing needed starting.');
-      dismissed.add(key);
-      renderOffer();
-    }
-    button.disabled = false;
-    button.textContent = label;
+    if (await bringBack(chosen())) { dismissed.add(key); renderOffer(); } else label();
   };
   $('dismiss-restore').onclick = () => { dismissed.add(key); renderOffer(); };
+}
+
+/** Reopen offered chats, each on the machine it ran on, in the order given. True when no part failed. */
+async function bringBack(groups: OfferGroup[]) {
+  const written = await call('restore', { groups, launch: true });
+  const failed = written.filter((w: any) => w.error);
+  const macFolders = written.filter((w: any) => w.machine === 'mac' && !w.error && w.via !== 'vscode').length;
+  const macChats = written.filter((w: any) => w.via === 'vscode').reduce((sum: number, w: any) => sum + (w.started ?? 0), 0);
+  const remoteStarted = written.filter((w: any) => w.machine === 'remote').reduce((sum: number, w: any) => sum + (w.started ?? 0), 0);
+  const remoteAttached = written.filter((w: any) => w.machine === 'remote').reduce((sum: number, w: any) => sum + (w.attached ?? 0), 0);
+  if (failed.length) {
+    toast(`${failed.length} part${failed.length === 1 ? '' : 's'} failed: ${failed[0].error}`, 'error');
+    return false;
+  }
+  const bits = [];
+  if (macChats) bits.push(`Brought back ${macChats} chat${macChats === 1 ? '' : 's'} in VS Code terminals`);
+  if (macFolders) bits.push(`VS Code is opening ${macFolders} folder${macFolders === 1 ? '' : 's'}`);
+  if (remoteStarted) bits.push(`${remoteStarted} started on ${R()}${remoteAttached ? `, ${remoteAttached} open in VS Code` : ', attach from a row'}`);
+  toast(bits.join('. ') || 'Nothing needed starting.');
+  return true;
 }
 
 /* ---------- list ---------- */
@@ -1051,7 +1326,7 @@ function rowSignature(s: Session) {
   return [s.name, s.live ? 1 : 0, s.needsYou ? 1 : 0, s.machine, s.lastMachine, s.status, s.lastLine,
     s.bytes + s.subagentBytes, ago(s.modifiedAt), s.modelShort, s.effort, s.chainPart, s.chainSize,
     s.transcriptMissing ? 1 : 0, s.cwd, s.contextPct, s.permission, s.rssMb, s.stoppedOn?.kind ?? '', s.quietMin ?? '',
-    state!.remote.reachable ? 1 : 0, remoteDown(s) ? ago(state!.remote.lastReachableAt) : '', R(), deep && deep.query === needle() ? deep.hits.get(s.sessionId)?.snippet ?? '' : '', commonModel, s.sameNameCount, s.sameNameRole, unfolded.has(s.sessionId) ? 1 : 0].join('|');
+    state!.remote.reachable ? 1 : 0, s.group, remoteDown(s) ? ago(state!.remote.lastReachableAt) : '', R(), deep && deep.query === needle() ? deep.hits.get(s.sessionId)?.snippet ?? '' : '', commonModel, s.sameNameCount, s.sameNameRole, unfolded.has(s.sessionId) ? 1 : 0].join('|');
 }
 
 const needle = () => (($('search') as HTMLInputElement).value || '').trim().toLowerCase();
@@ -1078,11 +1353,13 @@ function fillRow(row: HTMLElement, s: Session, sig: string, sub = false) {
   row.dataset.sig = sig;
   row.dataset.id = s.sessionId;
   row.dataset.machine = s.machine ?? '';
-  row.draggable = hasRemote() && s.machine !== 'remote' && Boolean(s.cwd);
+  // Onto a group to file it, or onto a machine card to move it.
+  row.draggable = true;
   row.tabIndex = 0;
   row.className = `row${s.live ? ' is-live' : ''}${s.needsYou ? ' is-needs' : ''}${
     s.live && !s.needsYou && (s.status === 'busy' || s.status === 'shell') ? ' is-busy' : ''}${
-    row.classList.contains('is-new') ? ' is-new' : ''}${selectedId === s.sessionId ? ' is-selected' : ''}${sub ? ' is-sub' : ''}${remoteDown(s) ? ' is-offline' : ''}`;
+    row.classList.contains('is-new') ? ' is-new' : ''}${selectedId === s.sessionId ? ' is-selected' : ''}${sub ? ' is-sub' : ''}${remoteDown(s) ? ' is-offline' : ''}${
+    picked.has(s.sessionId) ? ' is-picked' : ''}`;
   // A chat that just landed on the remote flashes once, so the move is seen.
   if (was === 'mac' && s.machine === 'remote') {
     row.classList.add('is-moved');
@@ -1131,6 +1408,7 @@ function fillRow(row: HTMLElement, s: Session, sig: string, sub = false) {
     : `<span class="num num-mem" title="Transcript size on disk">${s.transcriptMissing ? '' : mb(s.bytes + s.subagentBytes)}</span>`;
 
   row.innerHTML = `
+    <label class="pick"><input type="checkbox" aria-label="Tick ${escapeHtml(s.name)}"${picked.has(s.sessionId) ? ' checked' : ''}></label>
     <span class="dot" aria-hidden="true"></span>
     <div class="cell-main">
       <div class="name" title="${escapeHtml(s.name)}${s.cwd ? ` in ${escapeHtml(shortPath(s.cwd))}` : ''}">${escapeHtml(s.name)}${
@@ -1174,6 +1452,7 @@ function agentsBlock(): HTMLElement | null {
   el.dataset.sig = sig;
   el.dataset.id = '#agents';
   const row = (a: Agent) => `<div class="row agent-row${a.stale ? ' is-stale' : ''}" data-agent="${escapeHtml(a.id)}">
+      <span aria-hidden="true"></span>
       <span class="dot" aria-hidden="true"></span>
       <div class="cell-main">
         <div class="name">${escapeHtml(a.name)}<span class="role" data-role="bg" title="A background agent (claude --bg). The text is its own summary from its job file.">background</span></div>
@@ -1214,7 +1493,7 @@ function agentsBlock(): HTMLElement | null {
   return el;
 }
 
-/* ---------- batch actions for a family or project ---------- */
+/* ---------- batch actions: ticked chats, or the group or folder in view ---------- */
 
 const movable = (s: Session) => s.live && s.machine === 'mac' && s.status === 'idle' && Boolean(s.cwd);
 const working = (s: Session) => s.live && s.machine === 'mac' && (s.status === 'busy' || s.status === 'shell');
@@ -1227,29 +1506,58 @@ const startable = (list: Session[]) =>
 const BATCH_START_MAX = 12;
 
 function renderBatch() {
-  const host = $('batch');
-  if (view.kind !== 'family' && view.kind !== 'project') { host.innerHTML = ''; host.hidden = true; return; }
-  const scope = allSessions().filter(inView);
+  const bar = $('batch');
+  const host = $('batch-acts');
+  const chosen = allSessions().filter((s) => picked.has(s.sessionId));
+  $('pick-count').textContent = chosen.length ? `${n(chosen.length)} selected` : '';
+  if (!chosen.length && view.kind !== 'group' && view.kind !== 'root') { host.innerHTML = ''; bar.classList.add('is-empty'); return; }
+  const scope = chosen.length ? chosen : allSessions().filter(inView);
+  // Ticked chats on the restore offer come back through it: each on the machine
+  // it ran on, folders in the offer's order, chats in the order they were open.
+  const offer = chosen.length ? offerGroups().map((g) => ({ ...g, sessions: g.sessions.filter((s) => picked.has(s.sessionId)) })).filter((g) => g.sessions.length) : [];
+  const offered = new Set(offer.flatMap((g) => g.sessions.map((s) => s.sessionId)));
+  const back = offered.size;
   const toMove = scope.filter(movable);
   const busy = scope.filter(working).length;
-  const stopped = startable(scope);
+  const stopped = startable(sortSessions(scope)).filter((s) => !offered.has(s.sessionId));
   const remoteUp = hasRemote() && state!.remote.reachable;
+  const fits = stopped.length && stopped.length <= BATCH_START_MAX;
   const parts = [
-    toMove.length && remoteUp ? `<button class="btn btn-primary" id="batch-move" type="button">Move ${toMove.length} idle to ${escapeHtml(R())}</button>` : '',
-    stopped.length && stopped.length <= BATCH_START_MAX && remoteUp ? `<button class="btn" id="batch-start-remote" type="button">Start ${stopped.length} stopped on ${escapeHtml(R())}</button>` : '',
-    stopped.length && stopped.length <= BATCH_START_MAX ? `<button class="btn" id="batch-open-mac" type="button">Open ${stopped.length} on the Mac</button>` : '',
+    back ? `<button class="btn btn-primary" id="batch-back" type="button">Bring back ${back}</button>` : '',
+    toMove.length && remoteUp ? `<button class="btn${back ? '' : ' btn-primary'}" id="batch-move" type="button">Move ${toMove.length} idle to ${escapeHtml(R())}</button>` : '',
+    fits && remoteUp ? `<button class="btn" id="batch-start-remote" type="button">Start ${stopped.length} stopped on ${escapeHtml(R())}</button>` : '',
+    fits ? `<button class="btn" id="batch-open-mac" type="button">Open ${stopped.length} on the Mac</button>` : '',
+    chosen.length ? `<label class="batch-group"><span class="sr-only">Move the ticked chats to a group</span><select id="batch-group"><option value="">Move to group…</option>${
+      groupNames().map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}<option value="/auto">Back to automatic</option></select></label>` : '',
+    chosen.length ? '<button class="btn btn-ghost" id="batch-clear" type="button">Clear</button>' : '',
   ].filter(Boolean);
   const notes = [
     busy ? `${busy} working, left where ${busy === 1 ? 'it is' : 'they are'}` : '',
     stopped.length > BATCH_START_MAX ? `${stopped.length} stopped, too many to start at once` : '',
     hasRemote() && !remoteUp ? `${R()} unreachable` : '',
   ].filter(Boolean);
-  host.hidden = !parts.length && !notes.length;
+  bar.classList.toggle('is-empty', !chosen.length && !parts.length && !notes.length);
   host.innerHTML = `${parts.join('')}${notes.length ? `<span class="batch-note">${notes.join(', ')}</span>` : ''}`;
-  const on = (id: string, fn: () => void) => { const b = document.getElementById(id) as HTMLButtonElement | null; if (b) b.onclick = () => { b.disabled = true; fn(); }; };
-  on('batch-move', () => batchToRemote(toMove));
-  on('batch-start-remote', () => batchToRemote(stopped));
-  on('batch-open-mac', () => batchOpenOnMac(stopped));
+  // A ticked chat that was acted on is unticked; whatever failed says so in the toast.
+  const on = (id: string, list: Session[], fn: () => Promise<unknown>) => {
+    const b = document.getElementById(id) as HTMLButtonElement | null;
+    if (b) b.onclick = async () => { b.disabled = true; await fn(); for (const s of list) picked.delete(s.sessionId); if (chosen.length) pickChanged(); };
+  };
+  on('batch-back', chosen.filter((s) => offered.has(s.sessionId)), () => bringBack(offer));
+  on('batch-move', toMove, () => batchToRemote(toMove));
+  on('batch-start-remote', stopped, () => batchToRemote(stopped));
+  on('batch-open-mac', stopped, () => batchOpenOnMac(stopped));
+  const clear = document.getElementById('batch-clear');
+  if (clear) clear.onclick = clearPicks;
+  const group = document.getElementById('batch-group') as HTMLSelectElement | null;
+  if (group) group.onchange = async () => {
+    if (group.value === '/auto') {
+      const r = await call('assignGroup', { names: [...new Set(chosen.map((s) => s.name))], group: null });
+      toast(r.ok ? `Moved ${chosen.length} chat${chosen.length === 1 ? '' : 's'} back to their automatic groups.` : r.error, r.ok ? 'ok' : 'error');
+      lastFingerprint = '';
+      await refresh();
+    } else if (group.value) await fileUnder(chosen, group.value);
+  };
 }
 
 /**
@@ -1332,7 +1640,7 @@ function renderList() {
   if (host.querySelector('.empty')) host.innerHTML = '';
 
   // Sections only when the view mixes states; a filtered view is one list.
-  const grouped = view.kind === 'all' || view.kind === 'machine' || view.kind === 'project' || view.kind === 'family';
+  const grouped = view.kind === 'all' || view.kind === 'machine' || view.kind === 'root' || view.kind === 'group';
   const states: Array<{ kind: string; label: string; is: (s: Session) => boolean }> = [
     { kind: 'needs', label: 'Needs you', is: (s) => s.needsYou },
     { kind: 'running', label: 'Running', is: (s) => s.live && !s.needsYou },
@@ -1343,12 +1651,23 @@ function renderList() {
       .filter((g) => g.items.length)
     : [{ kind: view.kind, label: viewTitle(), items: visible, count: matching.length }];
 
-  const keep = new Set<string>();
   // Before the cursor is taken: leaving the view removes the block, and a
   // cursor still pointing at it made insertBefore throw.
   const agentsEl = agentsBlock();
+  const keep = new Set<string>(agentsEl ? ['#agents'] : []);
+  for (const section of sections) {
+    keep.add(`#${section.kind}`);
+    for (const s of section.items) {
+      keep.add(s.sessionId);
+      if (unfolded.has(s.sessionId)) for (const x of subsOf.get(s.sessionId) ?? []) keep.add(x.sessionId);
+    }
+  }
+  // Rows leaving go before anything is placed. Left in until the end, a
+  // deleted row held the cursor, so every row after it was taken out and put
+  // back: the list scrolled away and the focused row lost focus.
+  for (const [id, el] of rowEls) if (!keep.has(id)) { el.remove(); rowEls.delete(id); }
   let cursor = host.firstElementChild;
-  if (agentsEl) { keep.add('#agents'); if (agentsEl === cursor) cursor = cursor.nextElementSibling; else host.insertBefore(agentsEl, cursor); }
+  if (agentsEl) { if (agentsEl === cursor) cursor = cursor.nextElementSibling; else host.insertBefore(agentsEl, cursor); }
   let fresh = 0;
   const place = (el: Element) => {
     if (el === cursor) cursor = cursor!.nextElementSibling;
@@ -1356,7 +1675,6 @@ function renderList() {
   };
   for (const section of sections) {
     const id = `#${section.kind}`;
-    keep.add(id);
     let header = rowEls.get(id);
     const label = grouped ? section.label : '';
     // Counted by each chat's own state, folded or not, so the header agrees with the sidebar.
@@ -1381,7 +1699,6 @@ function renderList() {
     place(header);
 
     const put = (s: Session, sub: boolean) => {
-      keep.add(s.sessionId);
       sessionById.set(s.sessionId, s);
       const sig = `${rowSignature(s)}|${sub ? 1 : 0}`;
       let row = rowEls.get(s.sessionId);
@@ -1402,9 +1719,6 @@ function renderList() {
       put(s, false);
       if (unfolded.has(s.sessionId)) for (const x of (subsOf.get(s.sessionId) ?? []).sort((a, b) => (a.sameNameRank ?? 0) - (b.sameNameRank ?? 0))) put(x, true);
     }
-  }
-  for (const [id, el] of rowEls) {
-    if (!keep.has(id)) { el.remove(); rowEls.delete(id); }
   }
 }
 
@@ -1576,27 +1890,54 @@ async function openSheet(session: Session) {
   ($('sheet-cancel') as HTMLButtonElement).focus();
 }
 
-function closeSheet() {
+/** Closes the sheet and gives focus back to a row, so the keyboard carries on where it was. */
+function closeSheet(focusId: string | null | undefined = pending?.sessionId) {
   $('sheet-scrim').hidden = true;
   pending = null;
+  if (focusId) rowEls.get(focusId)?.focus({ preventScroll: true });
 }
 
-$('sheet-cancel').onclick = closeSheet;
+$('sheet-cancel').onclick = () => closeSheet();
 $('sheet-confirm').onclick = async () => {
   if (!pending) return;
   const button = $('sheet-confirm') as HTMLButtonElement;
   button.disabled = true;
+  // The row that takes the deleted one's place, or the one above at the end of the list.
+  const row = rowEls.get(pending.sessionId);
+  const next = [row?.nextElementSibling, row?.previousElementSibling].find((x): x is HTMLElement => x instanceof HTMLElement && x.matches('.row[data-id]'));
   const r = await call('confirmDelete', { sessionId: pending.sessionId, projectDir: pending.projectDir });
   button.disabled = false;
   if (!r.ok) toast(r.error, 'error');
   else toast(`Moved ${mb(r.result.bytesReclaimed)} to the Trash and removed ${r.result.historyRemoved} history line${r.result.historyRemoved === 1 ? '' : 's'}.`);
-  closeSheet();
+  const kept = r.ok ? next?.dataset.id : pending.sessionId;
+  closeSheet(null);
   lastFingerprint = '';
   await refresh();
+  if (kept) rowEls.get(kept)?.focus({ preventScroll: true });
 };
 $('sheet-scrim').addEventListener('click', (event) => {
   if (event.target === $('sheet-scrim')) closeSheet();
 });
+
+/* ---------- zoom ---------- */
+
+/**
+ * WKWebView's page zoom, set over RPC: the whole window scales as one, text
+ * stays sharp, and the layout reflows at the zoomed width. Remembered here,
+ * like the sidebar, and put back at launch.
+ */
+const ZOOM_MIN = 0.8;
+const ZOOM_MAX = 1.6;
+let zoom = (() => { try { const z = Number(localStorage.getItem('switchboard.zoom')); return z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 1; } catch { return 1; } })();
+/** One step from the View menu, or from the keys in the harness: +1 in, -1 out, 0 back to 100%. */
+const stepZoom = (step: number) => setZoom(step === 0 ? 1 : zoom + step / 10);
+function setZoom(next: number) {
+  zoom = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)) * 10) / 10;
+  try { localStorage.setItem('switchboard.zoom', String(zoom)); } catch { /* not remembered */ }
+  call('setZoom', { level: zoom });
+  toast(`Zoom ${Math.round(zoom * 100)}%`);
+}
+if (zoom !== 1) call('setZoom', { level: zoom });
 
 /* ---------- boot ---------- */
 
@@ -1607,11 +1948,15 @@ async function refresh() {
   refreshing = true;
   try {
     state = await call('overview');
+    // Ticks outlive a refresh; a chat that is gone (deleted) loses its tick.
+    const ids = new Set(allSessions().map((s) => s.sessionId));
+    for (const id of picked) if (!ids.has(id)) picked.delete(id);
+    document.body.classList.toggle('has-picks', picked.size > 0);
     const t = state!.totals; const d = state!.remote; const r = state!.recorder;
     const fingerprint = [
       t.sessions, t.bytes, t.live, t.liveMac, t.liveRemote, t.sdkHidden,
       d.configured, d.label, d.reachable, d.liveCount, d.memAvailableMb, JSON.stringify((state as any).autoBalance ?? {}), state!.accounts?.available, (state!.configErrors ?? []).join(';'), JSON.stringify(state!.usage ?? []), JSON.stringify((state!.background ?? []).map((a) => [a.id, a.updatedAt])), state!.mac.usedMb, state!.mac.swapUsedMb, state!.mac.health?.level, d.health?.level, r.armed, r.problem,
-      state!.restore.count, (state!.restore.groups as any[]).flatMap((g) => g.sessions.map((s: Session) => s.sessionId)).join(','),
+      state!.restore.count, (state!.restore.groups as any[]).flatMap((g) => g.sessions.map((s: Session) => s.sessionId)).join(','), JSON.stringify(state!.groups ?? []), JSON.stringify(state!.projectsRoots ?? []),
       state!.projects.flatMap((p) => p.sessions.map(rowSignature)).join('\n'),
       Math.floor(Date.now() / 60000),
     ].join('\u0001');
@@ -1677,12 +2022,33 @@ $('search').addEventListener('keydown', async (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { $('nc-scrim').hidden = true; closeSheet(); closePopover(); if (document.activeElement === $('search')) ($('search') as HTMLElement).blur(); else closeDetail(); }
+  if (event.key === 'Escape') {
+    $('nc-scrim').hidden = true;
+    if (!$('sheet-scrim').hidden) closeSheet();
+    closePopover();
+    if (creatingGroup) cancelNewGroup();
+    if (picked.size) clearPicks();
+    if (document.activeElement === $('search')) ($('search') as HTMLElement).blur(); else closeDetail();
+  }
+  // In the app the View menu owns Cmd +, Cmd - and Cmd 0; stepping here too
+  // would zoom twice. The harness has no menu, so the keys stand in for it.
+  if (mock && (event.metaKey || event.ctrlKey) && ['=', '+', '-', '_', '0'].includes(event.key)) {
+    event.preventDefault();
+    stepZoom(event.key === '0' ? 0 : event.key === '-' || event.key === '_' ? -1 : 1);
+    return;
+  }
   if (event.key === 'f' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); ($('search') as HTMLInputElement).focus(); }
   // Before the modifier bail-out below, which used to swallow it.
   if (event.key === 'r' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); lastFingerprint = ''; refresh(); return; }
   const typing = ['INPUT', 'TEXTAREA'].includes((document.activeElement as HTMLElement)?.tagName ?? '');
   if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.key === ' ') {
+    // Space ticks the focused row, or the row open in the detail panel.
+    const active = document.activeElement as HTMLElement | null;
+    const row = active?.matches('.row[data-id]') ? active : active === document.body && selectedId ? rowEls.get(selectedId) : null;
+    if (row?.dataset.id) { event.preventDefault(); pick(row.dataset.id, !picked.has(row.dataset.id), event.shiftKey); }
+    return;
+  }
   const s = selectedId ? sessionById.get(selectedId) : null;
   if (event.key === 'j' || event.key === 'ArrowDown') { event.preventDefault(); moveSelection(1); }
   if (event.key === 'k' || event.key === 'ArrowUp') { event.preventDefault(); moveSelection(-1); }

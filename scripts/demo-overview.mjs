@@ -10,6 +10,8 @@
  * The output is the shape getOverview() returns, plus __rpc: canned replies the
  * window's harness mode serves for other requests (see CONTRIBUTING.md).
  */
+import { applyGroups } from '../src/core/groups.js';
+
 // Times are relative to when this runs, so every "ago" and "resets in" reads as written.
 const now = Date.now();
 const min = (n) => now - n * 60_000;
@@ -85,6 +87,9 @@ sessions.push(older);
 const primary = sessions.find((s) => s.name === 'SHOP_search' && s.live);
 for (const [s, rank, role] of [[primary, 0, 'running'], [older, 1, 'older']]) Object.assign(s, { sameNameCount: 2, sameNameRank: rank, sameNamePrimaryId: primary.sessionId, sameNameRole: role });
 
+const projectsRoots = [root, `${home}/code`];
+applyGroups(sessions, { groups: [], assign: {} }, { home, projectsRoots });
+
 const order = [root, P('storefront'), P('api-gateway'), P('data-pipeline'), P('docs-site'), P('mobile-app'), `${home}/code/ml-notebook`];
 const own = (cwd) => sessions.filter((s) => s.cwd === cwd);
 const projects = order.map((cwd) => {
@@ -103,6 +108,8 @@ const health = (level, reasons, usedPct) => ({ level, reasons, usedPct });
 const overview = {
   home,
   projects,
+  groups: [],
+  projectsRoots,
   totals: {
     projects: projects.length, sessions: sessions.length, bytes: sessions.reduce((n, s) => n + s.bytes, 0),
     live: sessions.filter((s) => s.live).length, liveMac: sessions.filter((s) => s.machine === 'mac').length,
