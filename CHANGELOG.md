@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A chat that compaction carries into a new transcript, or that /clear restarts, is no longer offered as closed. Restore keyed chats by id, and Bring back would have reopened the old copy beside the live one.
+
 - A chat renamed with /rename on the remote keeps working from the window: its tmux session is renamed to match, so Reply, the screen preview and `offload attach` find it.
 
 - A chat that stops while others keep running in its folder stays on the restore offer. It was offered for one 30-second poll, then dropped.

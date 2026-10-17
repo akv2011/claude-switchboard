@@ -84,8 +84,12 @@ export function writeSnapshot(sessions) {
     const live = liveByRoot.get(root) ?? [];
     const liveIds = new Set(live.map((session) => session.sessionId));
 
-    const vanished = (prior?.sessions ?? []).filter((s) => !liveIds.has(s.sessionId));
-    const outstanding = (prior?.lastLiveSet ?? []).some((s) => !liveIds.has(s.sessionId));
+    // A chat compaction carried into a new transcript, or one /clear restarted,
+    // keeps its process and changes only its id: still running, not closed.
+    const livePids = new Set(live.map(pidKey).filter(Boolean));
+    const running = (s) => liveIds.has(s.sessionId) || livePids.has(pidKey(s));
+    const vanished = (prior?.sessions ?? []).filter((s) => !running(s));
+    const outstanding = (prior?.lastLiveSet ?? []).some((s) => !running(s));
 
     // The offer is the live set from the poll before chats went away: taken on
     // the poll where something vanishes, held while any of it is still missing,
@@ -106,7 +110,8 @@ export function writeSnapshot(sessions) {
     // The vanished branch wins, because a teardown also passes through polls
     // where something is still live and must accumulate rather than reset.
     const priorIds = new Set((prior?.sessions ?? []).map((s) => s.sessionId));
-    const acted = live.some((s) => !priorIds.has(s.sessionId));
+    const priorPids = new Set((prior?.sessions ?? []).map(pidKey).filter(Boolean));
+    const acted = live.some((s) => !priorIds.has(s.sessionId) && !priorPids.has(pidKey(s)));
     let lastLiveSet;
     if (vanished.length) {
       lastLiveSet = mergeByOpenOrder(outstanding ? prior.lastLiveSet : [], prior?.sessions ?? live);
@@ -224,6 +229,9 @@ const RETAIN_MS = 48 * 60 * 60 * 1000;
  * @param {Set<string>|null} [resumable] transcript ids on disk; a caller that has
  *   just scanned the store passes them in rather than sweeping it again
  */
+/** A chat's process, per machine: a local pid and a remote pid can be the same number. */
+const pidKey = (s) => (s.pid ? `${s.machine ?? 'mac'}:${s.pid}` : null);
+
 export function restorableWorkspaces(snapshot = readSnapshot(), _reserved, runningIds, resumable) {
   if (!snapshot) return [];
   // A chat running on the remote is not something to bring back either.
@@ -236,7 +244,8 @@ export function restorableWorkspaces(snapshot = readSnapshot(), _reserved, runni
   return Object.entries(snapshot.workspaces ?? {})
     .map(([root, entry]) => {
       const liveIds = new Set((entry.sessions ?? []).map((s) => s.sessionId));
-      const offer = (entry.lastLiveSet ?? []).filter((s) => !liveIds.has(s.sessionId)
+      const livePids = new Set((entry.sessions ?? []).map(pidKey).filter(Boolean));
+      const offer = (entry.lastLiveSet ?? []).filter((s) => !liveIds.has(s.sessionId) && !livePids.has(pidKey(s))
         && !running.has(String(s.sessionId).toLowerCase())
         && (resumable === null || resumable.has(String(s.sessionId).toLowerCase())));
       return {

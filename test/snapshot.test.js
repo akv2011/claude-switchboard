@@ -425,3 +425,43 @@ test('working in a folder again clears its offer on the next poll', () => {
     .find((w) => w.root === root);
   assert.deepEqual(next.sessions.map((s) => s.name), ['New']);
 });
+
+test('a chat that continues into a new transcript is not offered as closed', () => {
+  // Compaction can carry a chat into a new transcript (a continued-in line) in the
+  // same process: the id changes, the chat never stopped. Offering the old id
+  // would reopen the conversation as it stood before, beside the live one.
+  const root = workspace('continued');
+  const before = { sessionId: 'cont-old', cwd: root, name: 'Long', machine: 'mac', pid: 4242, startedAt: 1 };
+  const after = { ...before, sessionId: 'cont-new' };
+  const offered = () => (restorableWorkspaces(readSnapshot(), undefined, new Set())
+    .find((w) => w.root === root)?.sessions ?? []).map((s) => s.sessionId);
+  writeSnapshot([before]);
+  writeSnapshot([after]);
+  writeSnapshot([after]);
+  assert.deepEqual(offered(), []);
+});
+
+test('a continuation neither ends nor joins an offer already standing in its folder', () => {
+  const root = workspace('continued-offer');
+  const gone = { sessionId: 'co-gone', cwd: root, name: 'Gone', machine: 'mac', pid: 11, startedAt: 1 };
+  const before = { sessionId: 'co-old', cwd: root, name: 'Long', machine: 'mac', pid: 12, startedAt: 2 };
+  const after = { ...before, sessionId: 'co-new' };
+  const offered = () => (restorableWorkspaces(readSnapshot(), undefined, new Set())
+    .find((w) => w.root === root)?.sessions ?? []).map((s) => s.sessionId);
+  writeSnapshot([gone, before]);
+  writeSnapshot([before]);
+  writeSnapshot([after]);
+  writeSnapshot([after]);
+  assert.deepEqual(offered(), ['co-gone']);
+});
+
+test('a remote pid that equals a local pid is not the same chat', () => {
+  const root = workspace('pid-clash');
+  const mac = { sessionId: 'clash-mac', cwd: root, name: 'Mac', machine: 'mac', pid: 777, startedAt: 1 };
+  const remote = { sessionId: 'clash-remote', cwd: root, name: 'Remote', machine: 'remote', pid: 777, startedAt: 2 };
+  writeSnapshot([mac]);
+  writeSnapshot([remote]);
+  const offered = (restorableWorkspaces(readSnapshot(), undefined, new Set())
+    .find((w) => w.root === root)?.sessions ?? []).map((s) => s.sessionId);
+  assert.deepEqual(offered, ['clash-mac']);
+});
