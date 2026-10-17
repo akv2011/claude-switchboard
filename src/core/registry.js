@@ -13,7 +13,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { SESSIONS_DIR } from './paths.js';
+import { SESSIONS_DIR, PROJECTS_DIR } from './paths.js';
 import { execFileSync } from 'node:child_process';
 import { verifyLiveness } from './liveness.js';
 
@@ -63,6 +63,17 @@ export function isTerminalSession(entry) {
 }
 
 /**
+ * A background session (claude --bg) that is a chat: it has a transcript. The
+ * daemon's spare workers register as kind "bg" too, before any conversation, so
+ * they have none and stay out. A bg chat open in a terminal showed as stopped.
+ */
+export function isBackgroundChat(entry, projectsDir = PROJECTS_DIR) {
+  if (entry?.kind !== 'bg' || !entry.sessionId || !entry.cwd) return false;
+  if (entry.entrypoint && entry.entrypoint !== 'cli') return false;
+  return fs.existsSync(path.join(projectsDir, entry.cwd.replace(/[^A-Za-z0-9]/g, '-'), `${entry.sessionId}.jsonl`));
+}
+
+/**
  * Registry entries that are genuinely running, PID-recycle checked.
  *
  * @param {{interactiveOnly?:boolean}} [options] pass false when you need every
@@ -77,7 +88,7 @@ export function readLiveSessions(options = {}) {
   for (const entry of raw) {
     const verdict = liveness.get(entry.pid);
     if (!verdict?.alive) continue;
-    if (interactiveOnly && !isTerminalSession(entry)) continue;
+    if (interactiveOnly && !isTerminalSession(entry) && !isBackgroundChat(entry)) continue;
     live.push({
       pid: entry.pid,
       sessionId: entry.sessionId ?? null,

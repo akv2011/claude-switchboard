@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A background chat (claude --bg) shows as running. Only interactive sessions counted, to keep the daemon's spare workers out; a spare has no conversation, so a bg session with a transcript now counts.
+
 - Installing waits for the old recorder job to stop before loading the new one. A load right after an unload could fail with launchctl status 5 and stop the install before it copied the app.
 
 - The restore offer names a chat the way the list does. It used the name saved while the chat ran, which for an unnamed chat is one Claude Code made from the folder, and the terminal tab Bring back opened carried it too.
