@@ -32,6 +32,7 @@ Three processes and one extension:
 | `model.js` | Facts from a transcript's tail: model, effort, last line, context tokens, permission mode, an API-error stop, folder names mentioned. |
 | `registry.js` | The live registry (`~/.claude/sessions`), plus chats found only through `ps`, and per-chat memory as a process-tree sum. |
 | `families.js` | Prefix families and same-name roles. |
+| `groups.js` | Sidebar groups (a pick, else the name prefix, else the folder), the folder-tree root of each chat, and `groups.json`. |
 | `load.js` | Machine load: memory used as Activity Monitor counts it, swap, swap-in and swap-out rates over 5 minutes, pressure level, load, temperature; one verdict per machine. |
 | `remote.js` | The optional second machine: probe, sync (rsync), start, attach, resume and stop in tmux, live screen. |
 | `config.js` | Read and validate `config.json`. |

@@ -7,7 +7,7 @@
  */
 
 // defineRPC is a static on BrowserView, not BrowserWindow.
-import { BrowserWindow, BrowserView } from 'electrobun/bun';
+import { BrowserWindow, BrowserView, ApplicationMenu } from 'electrobun/bun';
 import { toolPath } from '../core/paths.js';
 import {
   getOverview, previewDelete, performDelete, restoreGroups, clearProject,
@@ -17,6 +17,7 @@ import {
 import { listAccounts, switchAccount, newChatAs } from '../core/accounts.js';
 import { openAgent, stopAgent } from '../core/background.js';
 import { restartWith } from '../core/restart.js';
+import { assignGroup, createGroup, deleteGroup } from '../core/groups.js';
 
 // An app started from Finder or the Dock gets launchd's PATH, /usr/bin:/bin
 // and little else, which holds none of code, claude, cswap or rg.
@@ -77,6 +78,21 @@ const rpc = BrowserView.defineRPC({
 
       copyText: ({ text }) => copyText(text),
 
+      assignGroup: ({ names, group }) => assignGroup({ names, group }),
+
+      createGroup: ({ name }) => createGroup(name),
+
+      deleteGroup: ({ name }) => deleteGroup(name),
+
+      // WKWebView's own page zoom: the page lays out at the zoomed width, so
+      // its media and container queries follow, and text stays sharp.
+      setZoom: ({ level }) => {
+        const zoom = Number(level);
+        if (!(zoom >= 0.5 && zoom <= 2)) return { ok: false, error: 'zoom is 0.5 to 2' };
+        win.setPageZoom(zoom);
+        return { ok: true };
+      },
+
       clearTasks: ({ cwd }) => clearProject(cwd),
 
       enableAutoTasks: () => {
@@ -115,9 +131,38 @@ const rpc = BrowserView.defineRPC({
   },
 });
 
-new BrowserWindow({
+const win = new BrowserWindow({
   title: 'Claude Switchboard',
   url: 'views://mainview/index.html',
   frame: { x: 120, y: 100, width: 1080, height: 720 },
   rpc,
+});
+
+// Without a main menu macOS never delivered Cmd+= to the page, and Cmd+C and
+// Cmd+V did nothing in the search box. Roles other than the Edit ones carry no
+// shortcut of their own, so Quit and Hide name theirs.
+ApplicationMenu.setApplicationMenu([
+  { label: 'Claude Switchboard', submenu: [
+    { role: 'hide', accelerator: 'CommandOrControl+H' },
+    { role: 'hideOthers', accelerator: 'CommandOrControl+Alt+H' },
+    { role: 'showAll' },
+    { type: 'divider' },
+    { role: 'quit', accelerator: 'CommandOrControl+Q' },
+  ] },
+  { label: 'Edit', submenu: [
+    { role: 'undo' }, { role: 'redo' }, { type: 'divider' },
+    { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+  ] },
+  { label: 'View', submenu: [
+    { label: 'Zoom In', action: 'zoom-in', accelerator: 'CommandOrControl+=' },
+    { label: 'Zoom Out', action: 'zoom-out', accelerator: 'CommandOrControl+-' },
+    { label: 'Actual Size', action: 'zoom-reset', accelerator: 'CommandOrControl+0' },
+  ] },
+]);
+
+// The view owns the level, its memory and the toast; the menu only says which way.
+const ZOOM_STEPS: Record<string, number> = { 'zoom-in': 1, 'zoom-out': -1, 'zoom-reset': 0 };
+ApplicationMenu.on('application-menu-clicked', (event) => {
+  const step = ZOOM_STEPS[(event as { data?: { action?: string } }).data?.action ?? ''];
+  if (step !== undefined) (rpc as any).send.zoom({ step });
 });

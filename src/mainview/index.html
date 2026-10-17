@@ -34,15 +34,19 @@
   </header>
 
   <main class="shell" id="shell" role="tabpanel" aria-labelledby="tab-chats">
-    <nav class="nav" aria-label="Views and projects">
+    <nav class="nav" aria-label="Views, groups and folders">
       <div class="nav-scroll">
         <section class="nav-group">
           <h2 class="nav-title">Views</h2>
           <div id="views"></div>
         </section>
         <section class="nav-group">
-          <h2 class="nav-title">Projects</h2>
-          <div id="projects"></div>
+          <h2 class="nav-title">Groups</h2>
+          <div id="groups"></div>
+        </section>
+        <section class="nav-group">
+          <h2 class="nav-title"><button class="nav-fold" id="folders-toggle" type="button" aria-expanded="false" aria-controls="projects" data-focus-key="folders">Folders</button></h2>
+          <div id="projects" hidden></div>
         </section>
       </div>
       <footer class="nav-foot" id="nav-foot"></footer>
@@ -67,7 +71,7 @@
           </div>
         </div>
       </div>
-      <div class="batch" id="batch" hidden></div>
+      <div class="batch is-empty" id="batch"><span class="batch-count" id="pick-count" role="status" aria-atomic="true"></span><span class="batch-acts" id="batch-acts"></span></div>
       <div class="main">
         <div class="list" id="rows" aria-busy="true"></div>
         <aside class="detail" id="detail" hidden aria-label="Chat details"></aside>

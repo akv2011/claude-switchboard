@@ -26,6 +26,7 @@ import { readBackground } from './background.js';
 import { searchTranscripts } from './search.js';
 import { planDelete, deleteSession } from './deleter.js';
 import { readSnapshot, restorableWorkspaces } from './snapshot.js';
+import { readGroups, applyGroups } from './groups.js';
 import {
   readRemoteLive, remoteConfig, attachInTerminal, attachCommand, moveToRemote, pullFromRemote, resumeOnRemote, startOnRemote,
   stopOnRemote, controlSession, peekScreen, sshScript, tmuxName, toRemotePath, transcriptFor, CONTROLS,
@@ -65,16 +66,23 @@ export function getOverview(options = {}) {
   const snapshot = readSnapshot();
 
   // Where a closed chat last ran, so the row can say "was on the remote" and
-  // a move or a bring-up knows which machine holds its transcript.
+  // a move or a bring-up knows which machine holds its transcript. And the
+  // folder of the window it ran in, as restore reopens it, which files it in
+  // the tree.
   const lastMachine = new Map();
-  for (const entry of Object.values(snapshot?.workspaces ?? {})) {
+  const windowOf = new Map();
+  for (const [root, entry] of Object.entries(snapshot?.workspaces ?? {})) {
     for (const s of [...(entry.lastLiveSet ?? []), ...(entry.sessions ?? [])]) {
       if (s.machine) lastMachine.set(String(s.sessionId).toLowerCase(), s.machine);
+      windowOf.set(String(s.sessionId).toLowerCase(), root);
     }
   }
   for (const session of sessions) {
     session.lastMachine = session.machine ?? lastMachine.get(String(session.sessionId).toLowerCase()) ?? null;
+    session.workspaceRoot = windowOf.get(String(session.sessionId).toLowerCase()) ?? null;
   }
+  const groupConfig = readGroups();
+  applyGroups(sessions, groupConfig, { projectsRoots: config.projectsRoots });
 
   // Computed once. This used to be derived four times per refresh, each with
   // its own sweep of every project directory and its own `ps`.
@@ -103,6 +111,10 @@ export function getOverview(options = {}) {
       allBytes: project.allBytes,
       allLiveCount: project.allLiveCount,
     })),
+    // The ones the person created; the sidebar shows them even while empty.
+    groups: groupConfig.groups,
+    // The folder tree lists these first and opens them by default.
+    projectsRoots: config.projectsRoots,
     totals: {
       projects: projects.length,
       sessions: sessions.length,

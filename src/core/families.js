@@ -23,6 +23,11 @@ export function baseName(name) {
   return String(name ?? '').replace(SUFFIX, '').trim();
 }
 
+/** The code prefix of a name, "Shop" for "Shop_Crawl (2)", or null when it has none. */
+export function prefixOf(name) {
+  return baseName(name).match(PREFIX)?.[1] ?? null;
+}
+
 const unnamed = (name) => /^\(unnamed/.test(String(name ?? ''));
 
 export function markFamilies(sessions) {
