@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "claude-session-restore",
+      "name": "claude-switchboard",
       "dependencies": {
         "electrobun": "^1.18.1",
       },

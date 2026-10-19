@@ -4,8 +4,8 @@
  * Names are stored inside the transcript, not in the live registry, which is why
  * a dead session can still be named in the sidebar. Two entry types carry them:
  *
- *   {"type":"custom-title","customTitle":"Session_restore"}
- *   {"type":"ai-title","aiTitle":"VSCode terminal session restore and ..."}
+ *   {"type":"custom-title","customTitle":"Shop_checkout"}
+ *   {"type":"ai-title","aiTitle":"Checkout flow for the store and ..."}
  *
  * Over a few hundred real sessions, about a fifth had a custom title, four in
  * five an AI title, and about one in twenty neither.
