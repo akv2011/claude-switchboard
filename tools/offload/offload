@@ -35,7 +35,8 @@ usage: offload <cmd...>            run cmd on the remote in this directory, file
        offload -p <port>           make remote localhost:<port> answer on local localhost:<port>
        offload -p stop <port>      close that forward
        offload claude [name] [-- flags]  start Claude Code on the remote in this project (tmux)
-       offload move <name|id>      move a closed local chat to the remote with its name and history
+       offload move <name|id> [-- claude flags]  move a closed local chat to the remote with its name and
+                                   history; flags such as --model apply to that chat only
        offload attach <name>       attach to a Claude Code chat running on the remote
        offload status              list offload sync sessions with state and conflict counts
        offload -- <cmd...>         run a command that shares a name with a subcommand
@@ -386,9 +387,12 @@ PY
 # Moves a local chat to the remote with its name and history: syncs the folders it worked in,
 # copies its transcript, and resumes it there. A session open on two machines forks its transcript.
 cmd_move() {
-  [ $# -eq 1 ] || usage
-  local info id cwd name pid tp sub
-  info=$(resolve_session "$1") || exit 1
+  [ $# -ge 1 ] || usage
+  local info id cwd name pid tp sub extra="" a q1=$1
+  shift
+  # Flags after -- go to claude, as with offload claude: `offload move api_sync -- --model opus`.
+  if [ $# -gt 0 ]; then [ "$1" = "--" ] || usage; shift; for a in "$@"; do extra+=" $(q "$a")"; done; fi
+  info=$(resolve_session "$q1") || exit 1
   IFS=$'\t' read -r id cwd name pid tp roots <<<"$info"
   [ "$pid" = 0 ] || die "$name is still open here (pid $pid). Exit it (/exit), then run offload move again"
   [ -d "$cwd" ] || die "its folder $cwd is not on this machine"
@@ -416,7 +420,7 @@ cmd_move() {
     scp -pq "$tp" "$HOST:$pdir/"
     [ -d "$pdir/$id" ] && scp -prq "$pdir/$id" "$HOST:$pdir/"
   fi
-  launch "$t" "$cwd" "--resume $(q "$id")"
+  launch "$t" "$cwd" "--resume $(q "$id")$extra"
 }
 
 cmd_status() {

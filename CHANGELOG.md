@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `offload move <chat> -- --model <model>` passes Claude flags to the moved chat, as `offload claude` does. A chat could not be resumed on the remote with another model or effort.
+
 ## 1.1.0
 
 - The second machine may be a Mac as well as a Linux box, and the main machine may run Linux for everything but the window. The remote's probe reads macOS counters through the same parser as this Mac's, with the right page size for swap rates; claude-sync puts the organization rules file where each system keeps it and rewrites the home folder in hook commands; `offload` works with GNU or BSD stat. On Linux the recorder is a systemd user timer, and the load, notifications (notify-send), clipboard (wl-copy or xclip), terminal and VS Code settings paths follow the system.
