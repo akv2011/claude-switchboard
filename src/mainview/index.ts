@@ -280,6 +280,7 @@ const remoteCommands = (): Array<[string, string, string]> => [
   ['Start a new chat, from a terminal in its project folder', 'offload claude <name>', 'offload claude '],
   [`Open a chat running on ${R()} in a terminal here`, 'offload attach <name>', 'offload attach '],
   [`Move a closed chat to ${R()}, with its history`, 'offload move <name>', 'offload move '],
+  ['Resume one there with another model (or --effort), for that chat only', 'offload move <name> -- --model <model>', 'offload move <name> -- --model '],
   [`List what runs on ${R()}`, 'offload ls', 'offload ls'],
 ];
 
@@ -310,7 +311,7 @@ function openRemoteHelp(anchor: HTMLElement) {
     b.onclick = async () => {
       const text = b.dataset.copy!;
       const r = await call('copyText', { text });
-      toast(r?.ok ? `Copied ${text.trim()}. Paste it in a terminal${text.endsWith(' ') ? ' and add the name' : ''}.` : r?.error ?? 'Could not copy it', r?.ok ? 'ok' : 'error');
+      toast(r?.ok ? `Copied ${text.trim()}. Paste it in a terminal${text.includes('<name>') ? ', put the chat in place of <name> and add the model' : text.endsWith(' ') ? ' and add the name' : ''}.` : r?.error ?? 'Could not copy it', r?.ok ? 'ok' : 'error');
     };
   });
   (pop.querySelector('#dh-new') as HTMLButtonElement).focus();
