@@ -320,9 +320,15 @@ export async function searchAll(query) {
 /** Put text on the clipboard, for a suggested reply to paste into an agent. */
 export function copyText(text) {
   if (typeof text !== 'string' || !text || text.length > 4000) return Promise.resolve({ ok: false, error: 'nothing to copy' });
-  return new Promise((resolve) => {
-    execFile('pbcopy', [], (err) => resolve(err ? { ok: false, error: err.message } : { ok: true })).stdin.end(text);
+  // macOS pbcopy; on Linux wl-copy (Wayland), else xclip (X11).
+  const tools = process.platform === 'darwin' ? [['pbcopy', []]] : [['wl-copy', []], ['xclip', ['-selection', 'clipboard']]];
+  const tryOne = ([cmd, args]) => new Promise((resolve) => {
+    execFile(cmd, args, (err) => resolve(!err)).stdin.end(text);
   });
+  return (async () => {
+    for (const t of tools) if (await tryOne(t)) return { ok: true };
+    return { ok: false, error: process.platform === 'darwin' ? 'pbcopy failed' : 'no clipboard tool: install wl-clipboard or xclip' };
+  })();
 }
 
 export function peekRemoteScreen(name) {
@@ -354,7 +360,7 @@ export function remoteLoad(remote) {
     swapOutMbPerMin: remote.swapOutMbPerMin ?? null,
     swapInMbPerMin: remote.swapInMbPerMin ?? null,
     psiMem60: Number.isFinite(remote.psiMem60) ? remote.psiMem60 : null,
-    pressure: null,
+    pressure: remote.pressure ?? null,
     load1: remote.load1 ?? null,
     cores: remote.cores ?? null,
     tempC: remote.tempC ?? null,

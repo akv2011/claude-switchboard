@@ -5,7 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMacLoad, swapOutRate, windowRates, health } from '../src/core/load.js';
+import { parseMacLoad, parseLinuxLoad, swapOutRate, windowRates, health } from '../src/core/load.js';
 import { parseProbe } from '../src/core/remote.js';
 
 const SYSCTL = `25769803776
@@ -115,4 +115,18 @@ test('a remote chat\'s memory comes from its process tree in the probe', () => {
   const p = parseProbe(`RSS:500:102400\n${reg}\n---MEM---\nMemTotal: 1 kB\n---TMUX---\nx\n---PS---\n  500   1 102400\n  501 500  51200\n`);
   assert.equal(p.sessions[0].rssMb, 150);
   assert.deepEqual(p.tmux, ['x']);
+});
+
+test('a Linux machine of its own reads its load from /proc, in the same shape as a Mac', () => {
+  const m = parseLinuxLoad({
+    meminfo: 'MemTotal:       16000000 kB\nMemAvailable:    6000000 kB\nSwapTotal:      8388608 kB\nSwapFree:       7340032 kB\nZswapped:        524288 kB\n',
+    vmstat: 'pswpin 1200\npswpout 3400\n',
+    loadavg: '3.25 2.10 1.80 2/900 12345\n',
+    psi: 'some avg10=1.50 avg60=4.25 avg300=2.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n',
+    cores: 8,
+  });
+  assert.deepEqual([m.totalMb, m.usedMb, m.swapTotalMb, m.swapUsedMb, m.psiMem60, m.load1, m.cores, m.swapOuts, m.swapIns, m.pageSize],
+    [15625, 15625 - 5859, 8192, 512, 4.25, 3.25, 8, 3400, 1200, 4096], 'zswap pages in RAM are not counted as on disk');
+  assert.equal(health(m).level, 'ok');
+  assert.equal(parseLinuxLoad({ meminfo: '', vmstat: '', loadavg: '', cores: 0 }).totalMb, null);
 });

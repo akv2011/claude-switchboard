@@ -27,6 +27,10 @@ mkdir -p "$(dirname "$LOG")"
 [ -t 1 ] || exec >>"$LOG" 2>&1
 echo "$(date '+%F %T') start"
 $SSH "$HOST" true 2>/dev/null || { echo "$HOST unreachable, skipped"; exit 0; }
+# Either machine may run macOS or Linux, each with its own home folder.
+read -r remote_os remote_home < <($SSH "$HOST" 'echo "$(uname -s) $HOME"')
+[ -n "$remote_home" ] || { echo "could not read $HOST's home folder, skipped"; exit 0; }
+org_path() { [ "$1" = Darwin ] && echo "/Library/Application Support/ClaudeCode/CLAUDE.md" || echo /etc/claude-code/CLAUDE.md; }
 
 # This machine wins for configuration. --delete so a removed skill or plugin goes there too.
 [ -d "$C/skills" ] && $RSYNC -a --delete -e "$SSH" "$C/skills/" "$HOST:.claude/skills/"
@@ -36,16 +40,20 @@ for f in CLAUDE.md keybindings.json; do [ -f "$C/$f" ] && $RSYNC -a -e "$SSH" "$
 
 # An organization-wide rules file lives at a different path on each OS
 # (macOS /Library/Application Support/ClaudeCode, Linux /etc/claude-code).
-org="/Library/Application Support/ClaudeCode/CLAUDE.md"
+org=$(org_path "$(uname -s)")
 if [ -f "$org" ]; then
-  $SSH "$HOST" 'sudo -n mkdir -p /etc/claude-code && sudo -n tee /etc/claude-code/CLAUDE.md >/dev/null && sudo -n chmod 644 /etc/claude-code/CLAUDE.md' < "$org" ||
+  dest=$(org_path "$remote_os")
+  $SSH "$HOST" "sudo -n mkdir -p '$(dirname "$dest")' && sudo -n tee '$dest' >/dev/null && sudo -n chmod 644 '$dest'" < "$org" ||
     echo "skipped the organization rules file: passwordless sudo is needed on $HOST"
 fi
 
-# settings.json for the remote: plugins it cannot run (a browser it does not have) off, and
-# SessionStart hooks that only make sense here dropped.
+# settings.json for the remote: plugins it cannot run (a browser it does not have) off,
+# SessionStart hooks that only make sense here dropped, and this home folder in hook and
+# status-line commands turned into the remote's, where the two differ (/Users/you, /home/you).
 if [ -f "$C/settings.json" ]; then
-  jq --arg disable "$disable" --arg drop "$drop" '
+  jq --arg disable "$disable" --arg drop "$drop" --arg lh "$HOME/" --arg rh "$remote_home/" '
+    def rehome: walk(if type == "string" then split($lh) | join($rh) else . end);
+    (if .hooks then .hooks |= rehome else . end) | (if .statusLine then .statusLine |= rehome else . end) |
     reduce ($disable | split(",") | map(select(length > 0)))[] as $p (.; .enabledPlugins[$p] = false)
     | if ($drop | length) > 0 and .hooks.SessionStart then
         .hooks.SessionStart |= map(.hooks |= map(select((.command // "") | test($drop) | not)))

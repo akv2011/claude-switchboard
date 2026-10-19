@@ -29,7 +29,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
-import { swapOutRate } from './load.js';
+import { swapOutRate, parseMacLoad } from './load.js';
 import { stateDir, encodeCwd } from './paths.js';
 import { isTerminalSession, treeRss } from './registry.js';
 import { readConfig, expandHome } from './config.js';
@@ -56,24 +56,39 @@ const OFF = Object.freeze({
 
 // Each registry file is printed only if its pid still exists. Claude deletes
 // them on exit, but a crash leaves one behind pointing at a dead pid.
+// The remote may run Linux or macOS. A non-login ssh on a Mac has no Homebrew on PATH, where
+// tmux and jq live there, so it is added; on Linux the extra entries are simply not there.
+const PATH_FIX = 'export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"';
 const PROBE = `
+${PATH_FIX}
 for f in "$HOME"/.claude/sessions/*.json; do
   [ -f "$f" ] || continue
   p=$(basename "$f" .json)
-  [ -d "/proc/$p" ] || continue
-  echo "RSS:$p:$(awk '/VmRSS/{print $2}' /proc/$p/status 2>/dev/null)"
+  kill -0 "$p" 2>/dev/null || continue
+  echo "RSS:$p:$(ps -o rss= -p "$p" 2>/dev/null | tr -d ' ')"
   cat "$f"; echo
 done
 echo "---MEM---"
 echo "HOME:$HOME"
-grep -E "^(MemTotal|MemAvailable|SwapTotal|SwapFree|Zswapped):" /proc/meminfo
-echo "PSI:$(awk '/^some/{split($3,a,"=");print a[2]}' /proc/pressure/memory 2>/dev/null)"
-echo "PSWPIN:$(awk '/^pswpin /{print $2}' /proc/vmstat)"
-echo "LOAD:$(cut -d' ' -f1 /proc/loadavg):$(nproc)"
-for h in /sys/class/hwmon/hwmon*; do
-  case "$(cat "$h/name" 2>/dev/null)" in k10temp|coretemp) echo "TEMP:$(( $(cat "$h/temp1_input") / 1000 ))"; break ;; esac
-done
-echo "PSWPOUT:$(awk '/^pswpout /{print $2}' /proc/vmstat)"
+if [ "$(uname -s)" = Darwin ]; then
+  # A Mac: its own counters, read here by the same parser as this Mac's (load.js).
+  echo "OS:darwin"
+  echo "---MACSYSCTL---"
+  sysctl -n hw.memsize vm.swapusage kern.memorystatus_vm_pressure_level vm.loadavg hw.ncpu
+  echo "---VMSTAT---"
+  vm_stat
+  echo "---ENDMAC---"
+else
+  echo "OS:linux"
+  grep -E "^(MemTotal|MemAvailable|SwapTotal|SwapFree|Zswapped):" /proc/meminfo
+  echo "PSI:$(awk '/^some/{split($3,a,"=");print a[2]}' /proc/pressure/memory 2>/dev/null)"
+  echo "PSWPIN:$(awk '/^pswpin /{print $2}' /proc/vmstat)"
+  echo "LOAD:$(cut -d' ' -f1 /proc/loadavg):$(nproc)"
+  for h in /sys/class/hwmon/hwmon*; do
+    case "$(cat "$h/name" 2>/dev/null)" in k10temp|coretemp) echo "TEMP:$(( $(cat "$h/temp1_input") / 1000 ))"; break ;; esac
+  done
+  echo "PSWPOUT:$(awk '/^pswpout /{print $2}' /proc/vmstat)"
+fi
 # A chat renamed with /rename keeps the tmux session named at launch, and every
 # control here and \`offload attach\` find a chat by its name: rename the session
 # to match. Only sessions offload started a chat in (claude --name or --resume),
@@ -213,11 +228,36 @@ export function parseProbe(stdout, remote = null) {
   for (const x of sessions) if (tree.has(x.pid)) x.rssMb = tree.get(x.pid);
   const load = memPart.match(/LOAD:([\d.]+):(\d+)/);
   const swapTotalMb = mem('SwapTotal');
+  const os = memPart.match(/^OS:(\w+)/m)?.[1] ?? 'linux';
+  if (os === 'darwin') {
+    const m = parseMacLoad(memPart.split('---MACSYSCTL---')[1]?.split('---VMSTAT---')[0] ?? '',
+      memPart.split('---VMSTAT---')[1]?.split('---ENDMAC---')[0] ?? '');
+    return {
+      sessions, tmux, tmuxIds, home, os,
+      uid: Number(memPart.match(/^UID:(\d+)/m)?.[1] ?? NaN),
+      memTotalMb: m.totalMb || null,
+      memAvailableMb: m.totalMb ? m.totalMb - m.usedMb : null,
+      swapTotalMb: m.swapTotalMb,
+      swapUsedMb: m.swapUsedMb,
+      pressure: m.pressure,
+      psiMem60: NaN,
+      pswpin: m.swapIns,
+      pswpout: m.swapOuts,
+      pageSize: m.pageSize,
+      load1: Number.isFinite(m.load1) ? m.load1 : null,
+      cores: m.cores,
+      tempC: null,
+      // launchd starts a Mac's agents with no parent of their own, so none is flagged as left behind.
+      uses: ramUsers({ psText: psPart, panes, sessions, uid: Number(memPart.match(/^UID:(\d+)/m)?.[1] ?? NaN), orphans: false }),
+    };
+  }
   return {
     sessions,
     tmux,
     tmuxIds,
     home,
+    os,
+    pageSize: 4096,
     // The remote user's uid: the relay names the folder a remote chat's mirror goes in after it.
     uid: Number(memPart.match(/^UID:(\d+)/m)?.[1] ?? NaN),
     memTotalMb: mem('MemTotal'),
@@ -254,11 +294,12 @@ const LABELS = { 'mutagen-agent': 'Folder sync (Mutagen)' };
  * flagged: a tool's child processes left behind when their folder was deleted can hold gigabytes
  * for days with nothing in view. Pure: the probe's ps text (pid ppid rss uid comm) and tmux panes in.
  */
-export function ramUsers({ psText, panes = [], sessions = [], uid, userSystemd = 0, tmpfsKb = 0, top = 6 }) {
+export function ramUsers({ psText, panes = [], sessions = [], uid, userSystemd = 0, tmpfsKb = 0, orphans = true, top = 6 }) {
   const procs = new Map();
   for (const line of String(psText ?? '').split('\n')) {
     const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
-    if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), kb: Number(m[3]), uid: Number(m[4]), comm: m[5].trim() });
+    // macOS ps prints a program's full path; Linux its name.
+    if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), kb: Number(m[3]), uid: Number(m[4]), comm: m[5].trim().split('/').pop() });
   }
   if (!procs.size || !Number.isFinite(uid)) return [];
   const pane = new Map(panes);
@@ -276,7 +317,7 @@ export function ramUsers({ psText, panes = [], sessions = [], uid, userSystemd =
     if (p.uid !== uid || !p.kb) continue;
     const at = paneOf(pid);
     if (at) { add(`tmux:${pane.get(at)}`, chatPane.has(at) ? `Chat ${chatPane.get(at)}` : `Job ${pane.get(at)}`, p.kb); continue; }
-    const orphan = (p.ppid === 1 || p.ppid === userSystemd) && !SERVICES.has(p.comm);
+    const orphan = orphans && (p.ppid === 1 || p.ppid === userSystemd) && !SERVICES.has(p.comm);
     add(`${orphan ? 'left' : 'prog'}:${p.comm}`, LABELS[p.comm] ?? p.comm, p.kb, orphan);
   }
   if (tmpfsKb) add('tmpfs', 'Files in /tmp', tmpfsKb);
@@ -347,12 +388,12 @@ export function readRemoteLive(options = {}) {
       stdio: ['pipe', 'pipe', 'ignore'],
     });
     entry = { host: remote.host, checkedAt: now, lastReachableAt: now, reachable: true, ...parseProbe(stdout, remote) };
-    // Linux counts pswpout in 4 KB pages since boot; the cached probe is the earlier sample.
+    // Swap counters are in pages since boot: 4 KB on Linux, 16 KB on an Apple silicon Mac.
     entry.swapOutMbPerMin = cached?.reachable
-      ? swapOutRate({ at: cached.checkedAt, swapOuts: cached.pswpout }, { at: now, swapOuts: entry.pswpout }, 4096)
+      ? swapOutRate({ at: cached.checkedAt, swapOuts: cached.pswpout }, { at: now, swapOuts: entry.pswpout }, entry.pageSize ?? 4096)
       : null;
     entry.swapInMbPerMin = cached?.reachable
-      ? swapOutRate({ at: cached.checkedAt, swapOuts: cached.pswpin }, { at: now, swapOuts: entry.pswpin }, 4096)
+      ? swapOutRate({ at: cached.checkedAt, swapOuts: cached.pswpin }, { at: now, swapOuts: entry.pswpin }, entry.pageSize ?? 4096)
       : null;
   } catch (err) {
     // Keep the last set we saw, so a blip does not read as "everything closed".
@@ -396,7 +437,7 @@ export function sshScript(host, script, timeout = 30_000) {
       resolve(err
         ? { ok: false, stdout: stdout ?? '', error: (stderr ?? '').trim().split('\n').pop() || err.message }
         : { ok: true, stdout: stdout ?? '' });
-    }).stdin.end(`${script}\n`);
+    }).stdin.end(`${PATH_FIX}\n${script}\n`);
   });
 }
 
@@ -418,7 +459,7 @@ export function cachedTmuxId(name) {
 
 /** This machine's processes as `pid ppid command` lines, or '' when ps fails. */
 export function localProcesses() {
-  try { return execFileSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8' }); } catch { return ''; }
+  try { return execFileSync('ps', ['-eo', 'pid=,ppid=,command='], { encoding: 'utf8' }); } catch { return ''; }
 }
 
 /** tmux session ids on the remote to their names, as of the last reading; never touches the network. */
@@ -508,8 +549,10 @@ export function attachInTerminal(name, remote = remoteConfig()) {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${tmuxName(name)}.command`);
   fs.writeFileSync(file, `#!/bin/bash\nexec ${attachCommand(remote.host, name, cachedTmuxId(name))}\n`, { mode: 0o755 });
+  // On Linux, the desktop's terminal: Debian's alternatives name it x-terminal-emulator.
+  const [cmd, args] = process.platform === 'darwin' ? ['open', [file]] : ['x-terminal-emulator', ['-e', file]];
   return new Promise((resolve) => {
-    execFile('open', [file], (err) => resolve(err ? { ok: false, error: err.message } : { ok: true, file }));
+    execFile(cmd, args, (err) => resolve(err ? { ok: false, error: process.platform === 'darwin' ? err.message : `no terminal to open it in (${err.message}); run ${file} in one` } : { ok: true, file }));
   });
 }
 

@@ -15,6 +15,8 @@ import path from 'node:path';
 
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'csr-vs-'));
 process.env.HOME = fakeHome;
+// On Linux the settings live under XDG_CONFIG_HOME when it is set: never the real one here.
+delete process.env.XDG_CONFIG_HOME;
 
 const {
   readAutoTaskSetting, enableAutoTasks, userSettingsPath,
@@ -29,7 +31,7 @@ function writeSettings(content) {
 }
 
 test('a missing settings.json reads as disabled, not as an error', () => {
-  fs.rmSync(path.join(fakeHome, 'Library'), { recursive: true, force: true });
+  fs.rmSync(path.dirname(userSettingsPath()), { recursive: true, force: true });
   const s = readAutoTaskSetting();
   assert.equal(s.enabled, false);
   assert.equal(s.readable, false);
@@ -106,7 +108,7 @@ test('enabling twice is a no-op the second time', () => {
 });
 
 test('a missing settings.json is created rather than erroring', () => {
-  fs.rmSync(path.join(fakeHome, 'Library'), { recursive: true, force: true });
+  fs.rmSync(path.dirname(userSettingsPath()), { recursive: true, force: true });
   const result = enableAutoTasks();
   assert.equal(result.changed, true);
   assert.equal(readAutoTaskSetting().enabled, true);

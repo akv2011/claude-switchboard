@@ -1,9 +1,10 @@
 /**
- * Keep the recorder running across logins, using launchd.
+ * Keep the recorder running across logins: launchd on macOS, a systemd user timer on Linux.
  *
  * KeepAlive restarts it if it ever dies, RunAtLoad starts it at login. Without
  * this the recorder is only running when you remember to start it, and the one
- * time you forget is the time the laptop dies.
+ * time you forget is the time the laptop dies. On Linux the timer runs one tick
+ * every 30 s, as launchd's interval mode does.
  */
 
 import fs from 'node:fs';
@@ -52,7 +53,7 @@ function daemonEntry() {
  * follows upgrades.
  */
 export function stableNodePath() {
-  for (const candidate of ['/opt/homebrew/bin/node', '/usr/local/bin/node']) {
+  for (const candidate of ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node']) {
     if (fs.existsSync(candidate)) return candidate;
   }
   return process.execPath;
@@ -101,7 +102,75 @@ ${schedule}
 `;
 }
 
+// ---------- Linux: a systemd user timer ----------
+
+const UNIT = 'claude-switchboard-recorder';
+const UNITS_DIR = path.join(os.homedir(), '.config', 'systemd', 'user');
+const systemctl = (args, opts = {}) => execFileSync('systemctl', ['--user', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...opts });
+
+/** The service and timer units, as text. Pure. */
+export function buildSystemdUnits({ intervalSeconds = 30, nodePath = stableNodePath(), entry = daemonEntry() } = {}) {
+  const log = (name) => path.join(stateDir(), name);
+  return {
+    service: `[Unit]
+Description=Claude Switchboard recorder, one tick
+
+[Service]
+Type=oneshot
+ExecStart=${nodePath} ${entry} --once
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=append:${log('launchd.out.log')}
+StandardError=append:${log('launchd.err.log')}
+`,
+    timer: `[Unit]
+Description=Claude Switchboard recorder, every ${intervalSeconds} s
+
+[Timer]
+OnBootSec=${intervalSeconds}
+OnUnitActiveSec=${intervalSeconds}
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target
+`,
+  };
+}
+
+function installSystemd(options) {
+  fs.mkdirSync(UNITS_DIR, { recursive: true });
+  fs.mkdirSync(stateDir(), { recursive: true });
+  trimErrorLog();
+  const units = buildSystemdUnits(options);
+  fs.writeFileSync(path.join(UNITS_DIR, `${UNIT}.service`), units.service);
+  fs.writeFileSync(path.join(UNITS_DIR, `${UNIT}.timer`), units.timer);
+  systemctl(['daemon-reload']);
+  systemctl(['enable', '--now', `${UNIT}.timer`]);
+  return path.join(UNITS_DIR, `${UNIT}.timer`);
+}
+
+function statusSystemd() {
+  const installed = fs.existsSync(path.join(UNITS_DIR, `${UNIT}.timer`));
+  const mode = { kind: 'interval', intervalSeconds: Number(fs.existsSync(path.join(UNITS_DIR, `${UNIT}.timer`))
+    && fs.readFileSync(path.join(UNITS_DIR, `${UNIT}.timer`), 'utf8').match(/OnUnitActiveSec=(\d+)/)?.[1]) || null };
+  let active = false;
+  let result = null;
+  try { active = systemctl(['is-active', `${UNIT}.timer`]).trim() === 'active'; } catch { /* inactive exits non-zero */ }
+  try { result = systemctl(['show', `${UNIT}.service`, '-p', 'Result', '--value']).trim() || null; } catch { /* unknown */ }
+  const broken = result !== null && result !== 'success';
+  return { installed, loaded: active, armed: active && !broken, problem: broken ? `last tick failed (${result})` : null, mode, running: false, pid: null };
+}
+
+function uninstallSystemd() {
+  try { systemctl(['disable', '--now', `${UNIT}.timer`]); } catch { /* not enabled */ }
+  for (const f of [`${UNIT}.timer`, `${UNIT}.service`]) fs.rmSync(path.join(UNITS_DIR, f), { force: true });
+  try { systemctl(['daemon-reload']); } catch { /* no user manager */ }
+}
+
+const linux = process.platform === 'linux';
+
 export function install(options = {}) {
+  if (linux) return installSystemd(options);
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
   fs.mkdirSync(stateDir(), { recursive: true });
   trimErrorLog();
@@ -128,6 +197,7 @@ export function install(options = {}) {
 }
 
 export function uninstall() {
+  if (linux) return uninstallSystemd();
   const uid = process.getuid();
   try {
     execFileSync('launchctl', ['bootout', `gui/${uid}/${LABEL}`], { stdio: 'ignore' });
@@ -146,6 +216,7 @@ export function uninstall() {
  * is whether launchd has the agent loaded, so that is what `armed` reports.
  */
 export function status() {
+  if (linux) return statusSystemd();
   const uid = process.getuid();
   const installed = fs.existsSync(PLIST_PATH);
   const mode = readMode();

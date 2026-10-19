@@ -7,6 +7,8 @@
  * verdict also weighs swap, the rate pages are being swapped out right now,
  * the kernel's pressure level, load per core and CPU temperature.
  */
+import fs from 'node:fs';
+import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 
 const MB = 1024 * 1024;
@@ -37,6 +39,44 @@ export function parseMacLoad(sysctl, vmStat) {
     compressedMb: Math.round((pages('Pages occupied by compressor') * pageSize) / MB),
     pageSize,
   };
+}
+
+/**
+ * The same reading on Linux, from /proc. Pure: the files' text in.
+ *
+ * @param {{meminfo:string, vmstat:string, loadavg:string, psi?:string, cores:number}} input
+ */
+export function parseLinuxLoad({ meminfo, vmstat, loadavg, psi = '', cores }) {
+  const kb = (key) => Number(String(meminfo).match(new RegExp(`^${key}:\\s+(\\d+)`, 'm'))?.[1] ?? NaN);
+  const mb = (n) => (Number.isFinite(n) ? Math.round(n / 1024) : null);
+  const count = (key) => Number(String(vmstat).match(new RegExp(`^${key} (\\d+)`, 'm'))?.[1] ?? NaN);
+  const totalMb = mb(kb('MemTotal'));
+  const swapTotalMb = mb(kb('SwapTotal'));
+  return {
+    totalMb,
+    usedMb: totalMb === null ? null : totalMb - (mb(kb('MemAvailable')) ?? totalMb),
+    swapTotalMb,
+    // zswap keeps compressed pages in RAM; only the rest is on disk.
+    swapUsedMb: swapTotalMb === null ? null : Math.max(0, swapTotalMb - (mb(kb('SwapFree')) ?? swapTotalMb) - (mb(kb('Zswapped')) ?? 0)),
+    pressure: null,
+    psiMem60: Number(String(psi).match(/^some .*avg60=([\d.]+)/m)?.[1] ?? NaN),
+    load1: Number(String(loadavg).split(' ')[0]) || 0,
+    cores: cores || null,
+    tempC: null,
+    swapOuts: count('pswpout'),
+    swapIns: count('pswpin'),
+    pageSize: 4096,
+  };
+}
+
+function linuxLoad(samples) {
+  const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+  const m = parseLinuxLoad({ meminfo: read('/proc/meminfo'), vmstat: read('/proc/vmstat'), loadavg: read('/proc/loadavg'),
+    psi: read('/proc/pressure/memory'), cores: os.availableParallelism?.() ?? os.cpus().length });
+  if (!m.totalMb) throw new Error('no /proc/meminfo');
+  samples.push({ at: Date.now(), swapOuts: m.swapOuts, swapIns: m.swapIns });
+  while (samples.length > 2 && Date.now() - samples[1].at > 6 * 60_000) samples.shift();
+  return { ...m, ...windowRates(samples, m.pageSize) };
 }
 
 /** MB per minute swapped out between two samples, or null without a usable earlier one. */
@@ -70,6 +110,8 @@ const macSamples = [];
  */
 export function macLoad({ samples = macSamples } = {}) {
   try {
+    // Named for the Mac, where the window began; on Linux the same reading comes from /proc.
+    if (process.platform === 'linux') return linuxLoad(samples);
     const sysctl = execFileSync('sysctl', ['-n', 'hw.memsize', 'vm.swapusage', 'kern.memorystatus_vm_pressure_level', 'vm.loadavg', 'hw.ncpu'], { encoding: 'utf8', timeout: 5000 });
     const m = parseMacLoad(sysctl, execFileSync('vm_stat', { encoding: 'utf8', timeout: 5000 }));
     samples.push({ at: Date.now(), swapOuts: m.swapOuts, swapIns: m.swapIns });
