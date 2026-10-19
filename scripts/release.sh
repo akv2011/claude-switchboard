@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a release into dist/: the app zipped, the VS Code extension, checksums.
+# Build a release into dist/: the app zipped, the three VS Code extensions, checksums.
 # Usage: scripts/release.sh   (version comes from package.json)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -8,11 +8,12 @@ echo "release $version"
 
 npm test
 bun run gui
-(cd vscode-bridge && bunx --bun @vscode/vsce@3 package --no-dependencies --skip-license --allow-missing-repository -o "../dist/switchboard-bridge-$version.vsix")
-
 mkdir -p dist
+for x in bridge remote names; do
+  (cd "vscode-$x" && bunx --bun @vscode/vsce@3 package --no-dependencies --skip-license --allow-missing-repository -o "../dist/switchboard-$x-$version.vsix")
+done
 app="build/stable-macos-arm64/Claude Switchboard.app"
 [ -d "$app" ] || { echo "release: no build at $app" >&2; exit 1; }
-ditto -c -k --keepParent "$app" "dist/Claude-Session-Restore-$version-macos-arm64.zip"
+ditto -c -k --keepParent "$app" "dist/Claude-Switchboard-$version-macos-arm64.zip"
 (cd dist && shasum -a 256 ./*"$version"* > SHA256SUMS && cat SHA256SUMS)
 echo "release $version is in dist/"
