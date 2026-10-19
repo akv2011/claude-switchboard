@@ -4,6 +4,8 @@ artifacts/
 *.log
 .DS_Store
 vscode-bridge/*.vsix
+vscode-remote/*.vsix
+vscode-names/*.vsix
 dist/
 test/harness/
 .env

@@ -53,7 +53,7 @@ const trimSlash = (p) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
  * Validate a parsed config. Pure: `home` is the local home folder.
  *
  * @returns {{remote: null | {host:string, label:string, projectsRoot:string, localProjectsRoot:string},
- *            projectsRoots: string[], localOnlyMcp: string[], notify: {command: string[] | null}, errors: string[]}}
+ *            projectsRoots: string[], localOnlyMcp: string[], notify: {command: string[] | null}, relay: boolean, errors: string[]}}
  */
 export function parseConfig(raw, home = os.homedir()) {
   const errors = [];
@@ -100,7 +100,14 @@ export function parseConfig(raw, home = os.homedir()) {
     else errors.push('notify.command must be a list: the program, then its arguments; the message is added last');
   }
 
-  return { remote, projectsRoots, localOnlyMcp, notify: { command }, errors };
+  // Off unless asked for: it opens every chat's message socket to the other machine (peer-relay.js).
+  let relay = false;
+  if (obj.relay !== undefined) {
+    if (typeof obj.relay === 'boolean') relay = obj.relay;
+    else errors.push('relay must be true or false');
+  }
+
+  return { remote, projectsRoots, localOnlyMcp, notify: { command }, relay, errors };
 }
 
 /** The current settings. A missing file is the default; a broken one is reported, not fatal. */

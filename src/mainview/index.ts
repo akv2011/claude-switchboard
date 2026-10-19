@@ -55,7 +55,7 @@ type Session = {
   live: boolean; pid: number | null; status: string | null; transcriptMissing?: boolean;
   machine: Machine; lastMachine: Machine; lastLine: string | null; needsYou: boolean;
   contextPct: number | null; permission: string | null; permissionMode?: string | null; rssMb: number | null;
-  group: string; autoGroup: string; groupFrom: 'pick' | 'prefix' | 'folder'; root: string; parentSessionId?: string | null;
+  group: string; autoGroup: string; groupFrom: 'pick' | 'prefix' | 'folder'; isOld?: boolean; root: string; parentSessionId?: string | null;
   stoppedOn?: { kind: 'limit' | 'error'; text: string; at: string | null } | null; quietMin?: number | null;
   sameNameCount?: number; sameNameRank?: number; sameNamePrimaryId?: string;
   sameNameRole?: 'running' | 'latest' | 'also-running' | 'part' | 'branch' | 'older';
@@ -71,7 +71,10 @@ type Remote = {
   configured: boolean; label: string | null; localProjectsRoot: string | null;
   reachable: boolean; stale: boolean; checkedAt: number | null; lastReachableAt: number | null;
   memTotalMb: number | null; memAvailableMb: number | null; liveCount: number; error: string | null;
+  relay?: boolean;
   load: Load | null; health: Health;
+  uses?: Array<{ label: string; mb: number; count: number; leftover: boolean }>;
+  withoutTab?: Array<{ sessionId: string; name: string | null; cwd: string | null }>;
 };
 type Mac = Load & { health?: Health };
 type Usage = { slot: number; active: boolean; stale: boolean; failing: boolean;
@@ -84,10 +87,13 @@ type State = { home: string; projects: Project[]; groups: string[]; projectsRoot
 type OfferGroup = { cwd: string; sessions: Session[]; lastSeen: number | null };
 
 /** What the list shows. A view is a filter; a root folder is a scope, and a group may be one inside a root. */
-type View = { kind: 'all' | 'needs' | 'running' | 'stopped' | 'machine' | 'root' | 'group' | 'loose'; value?: string; root?: string };
+type View = { kind: 'all' | 'needs' | 'running' | 'stopped' | 'root' | 'group' | 'old' | 'loose'; value?: string; root?: string };
 
 let state: State | null = null;
 let view: View = { kind: 'all' };
+// On top of the view, not instead of it: a folder or group shown only for the remote keeps its place.
+let machineFilter: 'mac' | 'remote' | null = null;
+const whereNow = (s: Session) => (s.live ? s.machine : s.lastMachine) ?? 'mac';
 let lastFingerprint = '';
 const rowEls = new Map<string, HTMLElement>();
 const sessionById = new Map<string, Session>();
@@ -194,14 +200,15 @@ function stateWord(s: Session) {
 }
 
 function inView(s: Session) {
+  if (machineFilter && whereNow(s) !== machineFilter) return false;
   switch (view.kind) {
     case 'all': return true;
     case 'needs': return s.needsYou;
     case 'running': return s.live;
     case 'stopped': return !s.live;
-    case 'machine': return s.live ? s.machine === view.value : s.lastMachine === view.value;
     case 'root': return s.root === view.value;
-    case 'group': return s.group === view.value && (view.root === undefined || s.root === view.root);
+    case 'group': return !s.isOld && s.group === view.value && (view.root === undefined || s.root === view.root);
+    case 'old': return Boolean(s.isOld) && s.group === view.value && (view.root === undefined || s.root === view.root);
     case 'loose': return s.root === view.value && s.groupFrom === 'folder';
   }
 }
@@ -222,9 +229,9 @@ function viewTitle() {
     case 'needs': return 'Needs you';
     case 'running': return 'Running';
     case 'stopped': return 'Stopped';
-    case 'machine': return view.value === 'remote' ? `On ${R()}` : 'On the Mac';
     case 'root': return shortPath(view.value!) || 'No folder';
     case 'group': return view.root === undefined ? view.value! : `${view.value} in ${rootText(view.root)}`;
+    case 'old': return `Old copies in ${view.value}`;
     case 'loose': return `No group in ${rootText(view.value!)}`;
   }
 }
@@ -266,6 +273,49 @@ function swapText(load: Load) {
   return `${amount}${used < 100 ? '' : ceiling}${trend}`;
 }
 
+const remoteInfo = () => `<button class="mcard-info" type="button" id="remote-info" data-pop aria-haspopup="dialog" aria-expanded="false" aria-label="How to start and reach chats on ${escapeHtml(R())}"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 7.3v3.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="4.9" r="0.85" fill="currentColor"/></svg></button>`;
+
+// What the info button on the remote's card lists: each an offload command (tools/offload) run from a terminal here.
+const remoteCommands = (): Array<[string, string, string]> => [
+  ['Start a new chat, from a terminal in its project folder', 'offload claude <name>', 'offload claude '],
+  [`Open a chat running on ${R()} in a terminal here`, 'offload attach <name>', 'offload attach '],
+  [`Move a closed chat to ${R()}, with its history`, 'offload move <name>', 'offload move '],
+  [`List what runs on ${R()}`, 'offload ls', 'offload ls'],
+];
+
+function openRemoteHelp(anchor: HTMLElement) {
+  closePopover();
+  const pop = document.createElement('div');
+  pop.id = 'popover';
+  pop.className = 'popover dh';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', `Chats on ${R()}`);
+  pop.innerHTML = `
+    <div class="pop-title">Chats on ${escapeHtml(R())}</div>
+    <button class="btn btn-primary dh-new" id="dh-new" type="button">New chat on ${escapeHtml(R())}</button>
+    <div class="dh-list">${remoteCommands().map(([what, shown, copy]) => `
+      <div class="dh-row"><div class="dh-what">${escapeHtml(what)}</div>
+        <div class="dh-cmd"><code translate="no">${escapeHtml(shown)}</code><button class="btn dh-copy" type="button" data-copy="${escapeHtml(copy)}" aria-label="Copy ${escapeHtml(copy.trim())}">Copy</button></div></div>`).join('')}
+    </div>
+    ${state!.remote.relay ? '<div class="pop-hint">In any chat, @ and a chat\'s name reaches a chat on the other machine.</div>' : ''}`;
+  document.body.appendChild(pop);
+  anchor.setAttribute('aria-expanded', 'true');
+  const a = anchor.getBoundingClientRect();
+  pop.style.left = `${Math.max(8, Math.min(a.left, window.innerWidth - pop.offsetWidth - 8))}px`;
+  pop.style.top = `${a.bottom + 6 + pop.offsetHeight > window.innerHeight ? Math.max(8, a.top - pop.offsetHeight - 6) : a.bottom + 6}px`;
+  const close = () => { closePopover(); (document.getElementById('remote-info') ?? anchor).focus(); };
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  (pop.querySelector('#dh-new') as HTMLButtonElement).onclick = () => { closePopover(); ncChoice.machine = 'remote'; openNewChat(); };
+  pop.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((b) => {
+    b.onclick = async () => {
+      const text = b.dataset.copy!;
+      const r = await call('copyText', { text });
+      toast(r?.ok ? `Copied ${text.trim()}. Paste it in a terminal${text.endsWith(' ') ? ' and add the name' : ''}.` : r?.error ?? 'Could not copy it', r?.ok ? 'ok' : 'error');
+    };
+  });
+  (pop.querySelector('#dh-new') as HTMLButtonElement).focus();
+}
+
 function mcard(machine: 'mac' | 'remote', label: string, load: Load | null, h: Health, running: number, down: boolean, action: string) {
   const level = down ? 'unknown' : h.level;
   const why = down ? 'Not answering over ssh' : h.reasons.length ? h.reasons.join(', ') : 'Nothing is under strain';
@@ -281,31 +331,60 @@ function mcard(machine: 'mac' | 'remote', label: string, load: Load | null, h: H
     load.tempC ? metric('CPU', `${load.tempC} °C`, has('CPU')) : '',
     load.diskFreeMb ? metric('Disk free', gb(load.diskFreeMb)) : '',
   ].join('');
-  const current = view.kind === 'machine' && view.value === machine;
+  const current = machineFilter === machine;
+  // The remote only: what holds its memory, since nothing there is in view the way the Mac's own apps are.
+  const uses = machine === 'remote' && !down ? (state!.remote.uses ?? []) : [];
+  const usesRow = uses.length ? `<div class="mcard-uses" role="group" aria-label="What uses the memory of ${escapeHtml(label)}"><span class="m-k">Using</span>${uses.map((u) => {
+    const what = `${escapeHtml(u.label)}${u.leftover ? ` (${u.count}, no parent)` : ''}`;
+    const tip = u.leftover ? ` title="Its parent process ended, so nothing will stop it. Stop it from a terminal on ${escapeHtml(label)}."`
+      : u.label === 'Files in /tmp' ? ` title="/tmp on ${escapeHtml(label)} is held in memory, and so is a deleted file there that a process still has open."` : '';
+    return `<span class="m"${tip}><span class="m-k">${what}</span><span class="m-v"${u.leftover ? ' data-warn="warn"' : ''}>${u.mb >= 1024 ? gb(u.mb) : `${u.mb} MB`}</span></span>`;
+  }).join('')}</div>` : '';
   return `<div class="mcard" data-machine="${machine}" data-health="${level}">
     <div class="mcard-head">
-      <button class="mcard-name" type="button" data-filter="${machine}" aria-pressed="${current}" title="Show only chats on ${machine === 'mac' ? 'the Mac' : escapeHtml(label)}">${escapeHtml(label)}</button>
+      <button class="mcard-name" type="button" data-filter="${machine}" aria-pressed="${current}" title="Show only chats on ${machine === 'mac' ? 'the Mac' : escapeHtml(label)}">${escapeHtml(label)}</button>${machine === 'remote' ? remoteInfo() : ''}
       <span class="health" data-level="${level}" title="${escapeHtml(why)}">${HEALTH_WORD[level]}</span>
       <span class="mcard-count">${down ? '' : `${running} running`}</span>
       <span class="mcard-action">${action}</span>
     </div>
-    <div class="mcard-figures">${figures}</div>
+    <div class="mcard-figures">${figures}</div>${usesRow}
   </div>`;
 }
 
 function renderMachines() {
+  // The machine filter names the remote as configured, and goes when there is none.
+  $('on-remote').textContent = R();
+  ($('on-remote').parentElement as HTMLElement).hidden = !hasRemote();
+  if (!hasRemote() && machineFilter) machineFilter = null;
   const t = state!.totals; const d = state!.remote; const m = state!.mac;
   const strained = m.health?.level === 'strained' || m.health?.level === 'critical';
   const auto = (state as any).autoBalance ?? { enabled: false };
   const lastAuto = auto.last?.moved ? `last moved ${escapeHtml(auto.last.moved)}` : auto.last?.wait ?? '';
   const balance = `<label class="auto-toggle" title="Each recorder tick may move one chat that has been idle ${auto.idleMin ?? 20}+ minutes from a strained Mac to a healthy ${escapeHtml(R())}. It reopens in its own tab and you get a notification.${lastAuto ? ` Now: ${lastAuto}.` : ''}"><input type="checkbox" id="auto-balance"${auto.enabled ? ' checked' : ''}> Auto</label>
     ${d.reachable ? `<button class="btn${strained ? ' btn-primary' : ''}" id="do-balance" type="button" title="Move idle Mac chats to ${escapeHtml(R())} while the Mac is strained">Balance to ${escapeHtml(R())}</button>` : ''}`;
+  // After a restart of this Mac the remote's chats run on, but their tabs here are gone, and restore offers only closed chats.
+  const tabless = d.withoutTab ?? [];
+  const reopen = tabless.length ? `<button class="btn" id="remote-tabs" type="button" title="Running on ${escapeHtml(R())} with no terminal on this Mac: ${escapeHtml(tabless.map((s) => s.name ?? s.sessionId.slice(0, 8)).join(', '))}">Attach ${tabless.length} here</button>` : '';
   $('machines').dataset.count = d.configured ? '2' : '1';
   $('machines').innerHTML = mcard('mac', 'Mac', { ...m, swapDynamic: true }, m.health ?? { level: 'unknown', reasons: [] }, t.liveMac, false, d.configured ? balance : '')
-    + (d.configured ? mcard('remote', R(), d.load, d.health ?? { level: 'unknown', reasons: [] }, t.liveRemote, !d.reachable, '') : '');
+    + (d.configured ? mcard('remote', R(), d.load, d.health ?? { level: 'unknown', reasons: [] }, t.liveRemote, !d.reachable, reopen) : '');
+  const info = document.getElementById('remote-info') as HTMLButtonElement | null;
+  if (info) {
+    const open = document.getElementById('popover')?.classList.contains('dh') ?? false;
+    info.setAttribute('aria-expanded', String(open));
+    info.onclick = () => (document.getElementById('popover')?.classList.contains('dh') ? closePopover() : openRemoteHelp(info));
+  }
+  const tabs = document.getElementById('remote-tabs') as HTMLButtonElement | null;
+  if (tabs) tabs.onclick = async () => {
+    tabs.disabled = true;
+    let opened = 0;
+    for (const s of [...tabless].reverse()) if ((await call('attach', { name: s.name ?? s.sessionId.slice(0, 8), cwd: s.cwd, sessionId: s.sessionId, focus: tabless.length === 1 }))?.ok) opened += 1;
+    toast(opened === tabless.length ? `Attached ${opened} chat${opened === 1 ? '' : 's'} from ${R()}, each in a VS Code terminal here.` : `Attached ${opened} of ${tabless.length}.`, opened === tabless.length ? 'ok' : 'error');
+    lastFingerprint = ''; await refresh();
+  };
   $('machines').querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((b) => {
     const machine = b.dataset.filter!;
-    b.onclick = () => setView(view.kind === 'machine' && view.value === machine ? { kind: 'all' } : { kind: 'machine', value: machine });
+    b.onclick = () => setMachineFilter(machineFilter === machine ? null : machine as 'mac' | 'remote');
   });
   const toggle = document.getElementById('auto-balance') as HTMLInputElement | null;
   if (toggle) toggle.onchange = async () => {
@@ -332,7 +411,7 @@ function renderMachines() {
       if (scope) {
         if (card.dataset.machine !== 'remote') { toast(`Groups move to ${R()}; drop them on its card.`); return; }
         const { kind, value, root } = JSON.parse(scope) as { kind: 'root' | 'group'; value: string; root?: string };
-        const members = allSessions().filter((s) => (kind === 'root' ? s.root === value : s.group === value && (root === undefined || s.root === root)));
+        const members = allSessions().filter((s) => !s.isOld && (kind === 'root' ? s.root === value : s.group === value && (root === undefined || s.root === root)));
         const list = members.filter(movable);
         const label = kind === 'root' ? shortPath(value) : root === undefined ? value : `${value} in ${rootText(root)}`;
         if (!list.length) toast(`Nothing in ${label} to move: none of its chats is open and idle on the Mac.`);
@@ -375,7 +454,7 @@ async function moveFlow(s: Session, target: 'mac' | 'remote', force = false, con
   const where = r.reopened?.ok ? (r.reopened.reused ? ', back in the same VS Code terminal' : ', open in a VS Code terminal') : '';
   if (r.verified === false) toast(r.error, 'error');
   else if (r.reopened && !r.reopened.ok) toast(`${s.name} is running on ${R()}. ${r.reopened.error}`, 'error');
-  else toast(`${s.name} is running on ${R()}${where}.`, 'ok');
+  else toast(`${s.name} is running on ${R()}${where}.${r.needsLocal ? ` It lately used ${r.needsLocal}, which only this Mac has; Move to Mac when it needs that again.` : ''}`, 'ok');
   lastFingerprint = ''; await refresh();
   const moved = sessionById.get(s.sessionId); if (moved) openDetail(moved);
 }
@@ -402,6 +481,7 @@ function closeDetail() {
   selectedId = null;
   window.clearInterval(peekTimer);
   $('detail').hidden = true;
+  $('detail-split').hidden = true;
   document.querySelectorAll('.row.is-selected').forEach((r) => r.classList.remove('is-selected'));
 }
 
@@ -413,8 +493,12 @@ async function openDetail(s: Session) {
   window.clearInterval(peekTimer);
   document.querySelectorAll('.row.is-selected').forEach((r) => r.classList.remove('is-selected'));
   rowEls.get(s.sessionId)?.classList.add('is-selected');
+  // Bring the list and the panel fully into view when the cards above push them down.
+  const main = document.querySelector('.main');
+  if (main && main.getBoundingClientRect().bottom > window.innerHeight + 1) main.scrollIntoView({ block: 'end', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   const d = $('detail');
   d.hidden = false;
+  $('detail-split').hidden = false;
   const machine = s.machine ?? s.lastMachine;
   const reachable = s.live && !remoteDown(s);
   const working = s.status === 'busy' || s.status === 'shell';
@@ -431,8 +515,10 @@ async function openDetail(s: Session) {
     reachable && working ? `<button class="btn" data-act="interrupt" type="button">Interrupt</button>` : '',
     reachable && s.machine === 'remote' ? `<button class="btn" data-act="attach" type="button">Attach</button><button class="btn" data-act="tomac" type="button">Move to Mac</button>` : '',
     s.live && s.machine === 'mac' ? `<button class="btn" data-act="open" type="button">Open</button>` : '',
+    // Closing a remote chat's tab only disconnects the view; this stops the chat itself.
+    reachable ? `<button class="btn" data-act="close" type="button">Close</button>` : '',
     s.machine !== 'remote' && hasRemote() && state!.remote.reachable ? `<button class="btn" data-act="move" type="button">Move to ${escapeHtml(R())}</button>` : '',
-    !s.live ? `<button class="btn" data-act="delete" type="button">Delete</button>` : '',
+    `<button class="btn d-delete" data-act="delete" type="button">Delete</button>`,
   ].join('');
   const fact = (k: string, v: string) => (v ? `<span class="m"><span class="m-k">${k}</span><span class="m-v">${v}</span></span>` : '');
   const ctx = s.contextPct == null ? '' : `<span class="m"><span class="m-k">Context</span><span class="m-bar" data-level="${s.contextPct >= 85 ? 'crit' : s.contextPct >= 60 ? 'warn' : ''}"><i style="width:${s.contextPct}%"></i></span><span class="m-v">${s.contextPct}%</span></span>`;
@@ -500,7 +586,7 @@ async function openDetail(s: Session) {
 
 async function attach(s: Session) {
   toast(`Opening ${s.name} in a VS Code terminal…`);
-  const r = await call('attach', { name: s.name, cwd: s.cwd });
+  const r = await call('attach', { name: s.name, cwd: s.cwd, sessionId: s.sessionId });
   toast(r.ok ? `${s.name} is open in VS Code${r.folder ? ` (${shortPath(r.folder)})` : ''}.` : r.error, r.ok ? 'ok' : 'error');
 }
 
@@ -529,7 +615,32 @@ async function detailAction(s: Session, act: string, button: HTMLButtonElement) 
   if (act === 'open') { const r = await call('openProject', { cwd: s.cwd }); toast(r.ok ? `Opened ${shortPath(s.cwd)} in VS Code.` : r.error, r.ok ? 'ok' : 'error'); return; }
   if (act === 'move') { moveFlow(s, 'remote'); return; }
   if (act === 'tomac') { moveFlow(s, 'mac'); return; }
-  if (act === 'delete') openSheet(s);
+  if (act === 'close') {
+    const where = s.machine === 'remote' ? `on ${R()}` : 'on the Mac';
+    const busyNow = ['busy', 'shell', 'waiting'].includes(s.status ?? '');
+    confirmBox(`Close ${s.name}?`, busyNow
+      ? `It is working ${where}${s.status === 'shell' ? ', with a background command running' : ''}. Closing stops that. Its history stays, and Bring back or Open reopens it.`
+      : `It stops running ${where}. Its history stays, and Bring back or Open reopens it.`, async () => {
+      const r = await call('closeChat', { sessionId: s.sessionId, force: busyNow });
+      toast(r.ok ? `Closed ${s.name} ${where}.` : r.error, r.ok ? 'ok' : 'error');
+      if (r.ok) closeDetail();
+      lastFingerprint = ''; await refresh();
+    }, busyNow ? 'Stop and close' : 'Close', 'Cancel');
+    return;
+  }
+  if (act === 'delete') {
+    if (!s.live) { openSheet(s); return; }
+    // A running chat is closed first, the way a move closes one; then the usual preview and confirm.
+    const where = s.machine === 'remote' ? `on ${R()}` : 'on the Mac';
+    confirmBox(`Delete ${s.name}?`, `It is running ${where}. It closes there first, then you choose what to delete.`, async () => {
+      toast(`Closing ${s.name} ${where}…`);
+      const r = await call('closeChat', { sessionId: s.sessionId });
+      if (!r.ok) { toast(r.error, 'error'); return; }
+      lastFingerprint = ''; await refresh();
+      const closed = sessionOf(s.sessionId);
+      if (closed) openSheet(closed);
+    }, 'Close and delete', 'Cancel');
+  }
 }
 
 /* ---------- nav ---------- */
@@ -788,7 +899,7 @@ function renderGroups() {
     const open = isOpen(key, (view.kind === 'group' && view.value === name && view.root === undefined) || selected?.group === name);
     host.appendChild(groupLine(name, list, shown, key, open, { kind: 'group', value: name }, 0));
     if (confirmingDelete === key) host.appendChild(deleteLine(name, list, key));
-    if (open) for (const s of shown) host.appendChild(chatLine(s, name, 0, 'chat'));
+    if (open) groupChats(host, name, shown, key, 0, 'chat');
   }
   host.appendChild(newGroupLine());
 }
@@ -807,13 +918,14 @@ const isProjectsRoot = (root: string) => (state!.projectsRoots ?? []).includes(r
 /** A drop target that files a chat under `name`, a box that ticks its chats, and a delete control when it was created by hand. */
 function groupLine(name: string, list: Session[], shown: Session[], key: string, open: boolean, view_: View, depth: number) {
   const here = view.kind === 'group' && view.value === name && view.root === view_.root;
-  const item = navItem(`${groupDot(list)}${escapeHtml(name)}`, n(list.length), here, () => setView(view_),
+  const latest = shown.filter((s) => !s.isOld);
+  const item = navItem(`${groupDot(list)}${escapeHtml(name)}`, n(list.filter((s) => !s.isOld).length), here, () => setView(view_),
     { title: `${groupTitle(name, list)}\nDrop a chat here to file it under ${name}.${hasRemote() ? ` Drag the group onto the ${R()} card to move its idle chats.` : ''}`, focusKey: `item:${key}` });
   item.draggable = true;
   item.addEventListener('dragstart', (e) => { e.dataTransfer?.setData('text/scope', JSON.stringify({ kind: 'group', value: name, root: view_.root })); });
   const line = withChevron(item, shown.length ? key : null, open);
   line.style.setProperty('--depth', String(depth));
-  item.before(pickBox(shown, `Tick every chat in ${name}`, `pick:${key}`));
+  item.before(pickBox(latest, `Tick every chat in ${name}`, `pick:${key}`));
   if ((state!.groups ?? []).includes(name)) {
     const del = document.createElement('button');
     del.type = 'button';
@@ -827,6 +939,30 @@ function groupLine(name: string, list: Session[], shown: Session[], key: string,
   }
   acceptChats(line, (s) => fileUnder(withPicked(s), name));
   return line;
+}
+
+/** A family's own "Old" row: its <name>_old copies, closed until opened, ticked apart from the family. */
+function oldLine(name: string, olds: Session[], key: string, open: boolean, depth: number, root?: string) {
+  const here = view.kind === 'old' && view.value === name && view.root === root;
+  const item = navItem(`${groupDot(olds)}Old`, n(olds.length), here, () => setView({ kind: 'old', value: name, root }),
+    { title: `Old copies in ${name}: chats renamed _old once a newer chat took the name. Opening or bringing back ${name} leaves them out; tick them here to check and delete them.`, focusKey: `item:${key}` });
+  item.classList.add('is-none');
+  const line = withChevron(item, key, open);
+  line.style.setProperty('--depth', String(depth));
+  item.before(pickBox(olds, `Tick the old copies in ${name}`, `pick:${key}`));
+  return line;
+}
+
+/** A group's chats in the sidebar: the latest, then its Old row and, when open, the old copies. */
+function groupChats(host: HTMLElement, name: string, shown: Session[], key: string, depth: number, focusAs: string, root?: string) {
+  const selected = selectedId ? sessionOf(selectedId) : null;
+  for (const s of shown.filter((x) => !x.isOld)) host.appendChild(chatLine(s, name, depth, focusAs));
+  const olds = shown.filter((x) => x.isOld);
+  if (!olds.length) return;
+  const okey = `${key}:old`;
+  const oopen = isOpen(okey, (view.kind === 'old' && view.value === name && view.root === root) || Boolean(selected?.isOld && selected.group === name));
+  host.appendChild(oldLine(name, olds, okey, oopen, depth + 1, root));
+  if (oopen) for (const s of olds) host.appendChild(chatLine(s, name, depth + 1, focusAs));
 }
 
 /**
@@ -862,7 +998,7 @@ function renderFolders() {
     item.draggable = true;
     item.addEventListener('dragstart', (e) => { e.dataTransfer?.setData('text/scope', JSON.stringify({ kind: 'root', value: root })); });
     const line = withChevron(item, key, rootOpen, isProjectsRoot(root));
-    item.before(pickBox(list.filter((s) => !s.sameNameRank), `Tick every chat in ${rootText(root)}`, `pick:${key}`));
+    item.before(pickBox(list.filter((s) => !s.sameNameRank && !s.isOld), `Tick every chat in ${rootText(root)}`, `pick:${key}`));
     host.appendChild(line);
     if (!rootOpen) continue;
 
@@ -876,7 +1012,7 @@ function renderFolders() {
       const gopen = isOpen(gkey, (view.kind === 'group' && view.value === name && view.root === root) || (selected?.root === root && selected?.group === name));
       host.appendChild(groupLine(name, members, shown, gkey, gopen, { kind: 'group', value: name, root }, 1));
       if (confirmingDelete === gkey) host.appendChild(deleteLine(name, members, gkey));
-      if (gopen) for (const s of shown) host.appendChild(chatLine(s, name, 1, 'tchat'));
+      if (gopen) groupChats(host, name, shown, gkey, 1, 'tchat', root);
     }
     // Last, so a chat with no prefix never reads as part of the group above it.
     const loose = list.filter((s) => s.groupFrom === 'folder');
@@ -1100,7 +1236,7 @@ type Window5 = { pct: number; resetsAt: string | null } | null;
 type Account = { number: number; email: string | null; org: string | null; active: boolean; status: string | null;
   fiveHour: Window5; sevenDay: Window5; models: Array<{ name: string; pct: number; resetsAt: string | null }>;
   loginExpiresAt: string | null; ageSeconds: number | null };
-let accountsData: { ok: boolean; accounts: Account[]; mostRoom: number | null; error?: string } | null = null;
+let accountsData: { ok: boolean; accounts: Account[]; mostRoom: number | null; error?: string; remote?: { ok: boolean; accounts: Array<{ number: number; email: string | null; active: boolean }>; pinned: number | null; error?: string } } | null = null;
 
 function setTab(next: 'chats' | 'accounts') {
   $('tab-chats').setAttribute('aria-selected', String(next === 'chats'));
@@ -1176,15 +1312,30 @@ function renderAccountsPage() {
   if (!data) return;
   if (!data.ok) { grid.innerHTML = `<div class="empty"><strong>Accounts not readable</strong>${escapeHtml(data.error ?? '')}</div>`; return; }
   const active = data.accounts.find((a) => a.active);
-  $('ap-sub').textContent = `${data.accounts.length} accounts from claude-swap${active ? `, account ${active.number} in use` : ''}${data.mostRoom ? `, most room on account ${data.mostRoom}` : ''}.`;
+  // The remote has its own logins (setup tokens), so its account is shown and picked apart from the Mac's.
+  const remote = data.remote ?? { ok: false, accounts: [], pinned: null };
+  const remoteActive = remote.accounts.find((d: any) => d.active);
+  const remoteLine = !hasRemote() ? '' : !remote.accounts.length ? ` The accounts of ${R()} are not known yet.`
+    : ` ${R()} is on account ${remoteActive?.number ?? '?'}${remote.pinned ? ', picked here' : ', following this Mac when it has the same account'}${remote.ok ? '' : ` (as last seen; ${R()} is not answering)`}.`;
+  $('ap-sub').innerHTML = `${escapeHtml(`${data.accounts.length} accounts from claude-swap${active ? `, account ${active.number} in use on this Mac` : ''}${data.mostRoom ? `, most room on account ${data.mostRoom}` : ''}.`)}${escapeHtml(remoteLine)}${
+    remote.pinned ? ' <button class="btn" type="button" id="ap-follow">Follow the Mac</button>' : ''}`;
+  const follow = document.getElementById('ap-follow') as HTMLButtonElement | null;
+  if (follow) follow.onclick = async () => {
+    follow.disabled = true;
+    const r = await call('followLocalOnRemote');
+    toast(r.ok ? `${R()} follows this Mac's account again.` : r.error, r.ok ? 'ok' : 'error');
+    await loadAccounts();
+  };
   const folders = state!.projects.filter((p) => p.cwd && !baseName(p.label).startsWith('.')).map((p) => p.cwd!);
   const options = [...new Set([`${state!.projects.find((p) => p.depth === 0)?.cwd ?? ''}`, ...folders])].filter(Boolean)
     .map((f) => `<option value="${escapeHtml(f)}">${escapeHtml(shortPath(f))}</option>`).join('');
   grid.innerHTML = data.accounts.map((a) => {
     const login = loginNote(a.loginExpiresAt);
     const [user, domain] = (a.email ?? '').split('@');
+    const there = remote.accounts.find((d: any) => d.number === a.number && (!d.email || d.email === a.email));
     const badges = [
       a.active ? '<span class="badge" data-kind="use">In use</span>' : '',
+      there?.active ? `<span class="badge" data-kind="remote" title="The chats on ${escapeHtml(R())} run on this account">${escapeHtml(R())}</span>` : '',
       data.mostRoom === a.number && !a.active ? '<span class="badge" data-kind="room">Most room</span>' : '',
       a.status && a.status !== 'ok' ? `<span class="badge" data-kind="crit">${escapeHtml(a.status)}</span>` : '',
       login.level ? `<span class="badge" data-kind="${login.level}">${escapeHtml(login.text)}</span>` : '',
@@ -1201,6 +1352,8 @@ function renderAccountsPage() {
       <footer class="acard-foot">
         <span class="acard-meta">${login.level ? '' : escapeHtml(login.text)}${a.ageSeconds !== null ? `${login.level ? '' : ', '}read ${a.ageSeconds < 90 ? 'just now' : `${Math.round(a.ageSeconds / 60)} min ago`}` : ''}</span>
         <span class="acard-actions">
+          ${there ? (there.active ? '' : `<button class="btn" type="button" data-do="remote">Use on ${escapeHtml(R())}</button>`)
+            : `<span class="acard-noremote" title="Add it there: claude setup-token on ${escapeHtml(R())}, then cswap add-token">Not on ${escapeHtml(R())}</span>`}
           <button class="btn" type="button" data-do="new" aria-expanded="false">New chat as ${a.number}</button>
           <button class="btn${a.active ? '' : ' btn-primary'}" type="button" data-do="switch"${a.active ? ' disabled title="Already in use"' : ''}>${a.active ? 'In use' : 'Switch to this'}</button>
         </span>
@@ -1218,8 +1371,17 @@ function renderAccountsPage() {
     const sw = card.querySelector<HTMLButtonElement>('[data-do="switch"]')!;
     const nw = card.querySelector<HTMLButtonElement>('[data-do="new"]')!;
     const form = card.querySelector<HTMLFormElement>('.acard-new')!;
+    const toRemote = card.querySelector<HTMLButtonElement>('[data-do="remote"]');
+    if (toRemote) toRemote.onclick = () => confirmBox(`Put ${R()} on account ${number}?`,
+      `Every chat on ${R()} moves to it with its next message. ${R()} then stays on it instead of following this Mac, until you choose Follow the Mac.`,
+      async () => {
+        toRemote.disabled = true; toRemote.textContent = 'Switching…';
+        const r = await call('useOnRemote', { number });
+        toast(r.ok ? `${R()} is on account ${number}. Its chats use it from their next message.` : r.error, r.ok ? 'ok' : 'error');
+        await loadAccounts();
+      }, `Use on ${R()}`, 'Cancel');
     sw.onclick = () => confirmBox(`Switch this Mac to account ${number}?`,
-      `Every chat on this Mac moves to it within about 30 seconds, and new chats start on it.${hasRemote() ? ` ${R()} keeps its own login.` : ''}`,
+      `Every chat on this Mac moves to it within about 30 seconds, and new chats start on it.${hasRemote() ? ` ${remote.pinned ? `${R()} stays on the account you picked for it.` : `${R()} follows when it has a login for this account.`}` : ''}`,
       async () => {
         sw.disabled = true; sw.textContent = 'Switching…';
         const r = await call('switchAccount', { number });
@@ -1254,6 +1416,10 @@ function renderOffer() {
 
   const count = offered.length;
   const lastSeen = Math.max(...groups.map((g) => g.lastSeen ?? 0));
+  // The newest time alone read "7 chats closed 6m ago" when 6 of them had closed 6 hours before.
+  const firstSeen = Math.min(...groups.map((g) => g.lastSeen || lastSeen));
+  const newest = ago(lastSeen) === 'now' ? '0m' : ago(lastSeen);
+  const when = ago(firstSeen) === ago(lastSeen) ? (newest === '0m' ? 'just now' : `${newest} ago`) : `${newest} to ${ago(firstSeen)} ago`;
   const onRemote = offered.filter((s) => s.machine === 'remote').length;
   const onMac = count - onRemote;
   const unreachable = onRemote > 0 && !state!.remote.reachable;
@@ -1262,13 +1428,13 @@ function renderOffer() {
     : `${groups.length} folder${groups.length === 1 ? '' : 's'}`;
   const split = onRemote
     ? `${onMac} on the Mac, <span class="remote">${onRemote} on ${escapeHtml(R())}</span>${unreachable ? ' <span class="down">(unreachable, those will wait)</span>' : ''}`
-    : 'They reopen in VS Code terminals.';
+    : 'They ran on the Mac and reopen there, each in a VS Code terminal.';
 
   const card = document.createElement('div');
   card.className = 'offer';
   card.innerHTML = `
     <div class="offer-body">
-      <div class="offer-title">${count} chat${count === 1 ? '' : 's'} closed ${ago(lastSeen)} ago in ${where}</div>
+      <div class="offer-title">${count} chat${count === 1 ? '' : 's'} closed ${when} in ${where}</div>
       <div class="offer-sub">${split}</div>
       <div class="offer-names" role="group" aria-label="Chats to bring back">${offered.map((s) => `<label class="offer-pick"><input type="checkbox" data-id="${
         escapeHtml(s.sessionId)}"${offerSkip.has(s.sessionId) ? '' : ' checked'}><span>${escapeHtml(s.name ?? s.sessionId.slice(0, 8))}</span></label>`).join('')}</div>
@@ -1464,7 +1630,8 @@ let showOldAgents = false;
  */
 function agentsBlock(): HTMLElement | null {
   const all = state!.background ?? [];
-  const inScope = view.kind === 'all' || view.kind === 'needs';
+  // Background agents run under the Mac's daemon, so the remote filter leaves them out.
+  const inScope = (view.kind === 'all' || view.kind === 'needs') && machineFilter !== 'remote';
   const q = needle();
   const list = all.filter((a) => !q || [a.name, a.needs, a.detail].some((v) => (v ?? '').toLowerCase().includes(q)));
   if (!inScope || !list.length) { rowEls.get('#agents')?.remove(); rowEls.delete('#agents'); return null; }
@@ -1536,8 +1703,9 @@ function renderBatch() {
   const host = $('batch-acts');
   const chosen = allSessions().filter((s) => picked.has(s.sessionId));
   $('pick-count').textContent = chosen.length ? `${n(chosen.length)} selected` : '';
-  if (!chosen.length && view.kind !== 'group' && view.kind !== 'root' && view.kind !== 'loose') { host.innerHTML = ''; bar.classList.add('is-empty'); return; }
-  const scope = chosen.length ? chosen : allSessions().filter(inView);
+  if (!chosen.length && view.kind !== 'group' && view.kind !== 'old' && view.kind !== 'root' && view.kind !== 'loose') { host.innerHTML = ''; bar.classList.add('is-empty'); return; }
+  // With nothing ticked, a group's buttons act on its latest chats; its old copies only from their own row.
+  const scope = chosen.length ? chosen : allSessions().filter((s) => inView(s) && (view.kind === 'old' || !s.isOld));
   // Ticked chats on the restore offer come back through it: each on the machine
   // it ran on, folders in the offer's order, chats in the order they were open.
   // The rest come back after them, folder by folder, each on the machine it last ran on,
@@ -1554,13 +1722,18 @@ function renderBatch() {
   for (const s of rest) { const w = s.root ?? s.cwd!; (byCwd.get(w) ?? byCwd.set(w, []).get(w)!).push({ ...s, machine: s.lastMachine ?? 'mac' }); }
   const backGroups: OfferGroup[] = [...offer, ...[...byCwd].map(([cwd, sessions]) => ({ cwd, sessions, lastSeen: null }))];
   const back = offered.size + rest.length;
+  // "Bring back" reopens each where it last ran, which is "Open on the Mac" when all ran there: two
+  // buttons for one action, next to the banner's own "Bring back N chats".
+  const mixed = new Set(backGroups.flatMap((g) => g.sessions.map((s) => s.machine ?? 'mac'))).size > 1;
+  const showBack = back > 0 && mixed;
   const remoteUp = hasRemote() && state!.remote.reachable;
   const fits = stopped.length && stopped.length <= BATCH_START_MAX;
   const parts = [
-    back ? `<button class="btn btn-primary" id="batch-back" type="button">Bring back ${back}</button>` : '',
-    toMove.length && remoteUp ? `<button class="btn${back ? '' : ' btn-primary'}" id="batch-move" type="button">Move ${toMove.length} idle to ${escapeHtml(R())}</button>` : '',
-    fits && remoteUp ? `<button class="btn" id="batch-start-remote" type="button">Start ${stopped.length} stopped on ${escapeHtml(R())}</button>` : '',
-    fits ? `<button class="btn" id="batch-open-mac" type="button">Open ${stopped.length} on the Mac</button>` : '',
+    showBack ? `<button class="btn btn-primary" id="batch-back" type="button">Bring back ${back}, each where it last ran</button>` : '',
+    toMove.length && remoteUp ? `<button class="btn${showBack ? '' : ' btn-primary'}" id="batch-move" type="button">Move ${toMove.length} idle to ${escapeHtml(R())}</button>` : '',
+    // "Open", not "Start N stopped on": it read as if they had stopped there, and most never ran there.
+    fits && remoteUp ? `<button class="btn" id="batch-start-remote" type="button">Open ${stopped.length} on ${escapeHtml(R())}</button>` : '',
+    fits ? `<button class="btn${showBack || toMove.length ? '' : ' btn-primary'}" id="batch-open-mac" type="button">Open ${stopped.length} on the Mac</button>` : '',
     chosen.length ? `<label class="batch-group"><span class="sr-only">Move the ticked chats to a group</span><select id="batch-group"><option value="">Move to group…</option>${
       groupNames().map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}<option value="/auto">Back to automatic</option></select></label>` : '',
     chosen.length ? '<button class="btn btn-ghost" id="batch-clear" type="button">Clear</button>' : '',
@@ -1602,17 +1775,24 @@ function renderBatch() {
 async function batchToRemote(list: Session[]) {
   let moved = 0;
   const failed: string[] = [];
+  const needsLocal: string[] = [];
+  const toAttach: Array<{ name: string; cwd: string | null; sessionId: string }> = [];
   for (const [i, s] of list.entries()) {
     toast(`Moving ${s.name} to ${R()}, ${i + 1} of ${list.length}…`);
     const r = s.live ? await call('moveLive', { sessionId: s.sessionId }) : await call('moveToRemote', { sessionId: s.sessionId });
     if (r.ok) {
       moved += 1;
-      if (!s.live) await call('attach', { name: s.name, cwd: s.cwd });
+      if (r.needsLocal) needsLocal.push(`${s.name} (${r.needsLocal})`);
+      if (!s.live) toAttach.push({ name: r.tmux ?? s.name, cwd: s.cwd ?? null, sessionId: s.sessionId });
     } else failed.push(`${s.name}: ${r.busy ? 'working' : r.error}`);
     lastFingerprint = '';
     await refresh();
   }
-  toast(failed.length ? `Moved ${moved} of ${list.length}. ${failed[0]}` : `Moved ${moved} to ${R()}, each open in a VS Code terminal.`, failed.length ? 'error' : 'ok');
+  // Their tabs open together at the end, beside the tab in use and in list order, without taking
+  // the keyboard: opened as each move finished, minutes apart, they landed wherever the person was.
+  for (const a of [...toAttach].reverse()) await call('attach', { ...a, focus: toAttach.length === 1 });
+  const local = needsLocal.length ? ` These lately used what only this Mac has; Move to Mac when they need it again: ${needsLocal.join(', ')}.` : '';
+  toast(failed.length ? `Moved ${moved} of ${list.length}. ${failed[0]}${local}` : `Moved ${moved} to ${R()}, each open in a VS Code terminal.${local}`, failed.length ? 'error' : 'ok');
 }
 
 async function batchOpenOnMac(list: Session[]) {
@@ -1637,7 +1817,7 @@ function groupHeader(kind: string, label: string, count: number) {
 }
 
 function renderList() {
-  $('title').textContent = viewTitle();
+  $('title').textContent = `${viewTitle()}${machineFilter ? `, on ${machineFilter === 'remote' ? R() : 'the Mac'}` : ''}`;
   const matching = sortSessions(allSessions().filter(inView).filter(matchesSearch));
   const bytes = matching.reduce((sum, s) => sum + s.bytes + s.subagentBytes, 0);
   const running = matching.filter((s) => s.live).length;
@@ -1668,13 +1848,15 @@ function renderList() {
     rowEls.clear();
     host.innerHTML = view.kind === 'needs'
       ? '<div class="empty"><strong>Nothing needs you</strong>Every running chat is working on its own.</div>'
-      : '<div class="empty"><strong>Nothing here</strong>No chats match this view.</div>';
+      : machineFilter
+        ? `<div class="empty"><strong>Nothing on ${machineFilter === 'remote' ? escapeHtml(R()) : 'the Mac'} here</strong>Choose All above the list to see every chat.</div>`
+        : '<div class="empty"><strong>Nothing here</strong>No chats match this view.</div>';
     return;
   }
   if (host.querySelector('.empty')) host.innerHTML = '';
 
   // Sections only when the view mixes states; a filtered view is one list.
-  const grouped = view.kind === 'all' || view.kind === 'machine' || view.kind === 'root' || view.kind === 'group' || view.kind === 'loose';
+  const grouped = view.kind === 'all' || view.kind === 'root' || view.kind === 'group' || view.kind === 'loose';
   const states: Array<{ kind: string; label: string; is: (s: Session) => boolean }> = [
     { kind: 'needs', label: 'Needs you', is: (s) => s.needsYou },
     { kind: 'running', label: 'Running', is: (s) => s.live && !s.needsYou },
@@ -1804,6 +1986,7 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 function closePopover() {
   const el = document.getElementById('popover');
   if (el) el.remove();
+  document.querySelectorAll('[data-pop][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
 }
 
 async function control(session: Session, action: string, value = '', done: string) {
@@ -1885,7 +2068,7 @@ function openPopover(anchor: HTMLElement, s: Session, kind: 'reply' | 'more') {
 
 document.addEventListener('mousedown', (e) => {
   const pop = document.getElementById('popover');
-  if (pop && !pop.contains(e.target as Node) && !(e.target as HTMLElement).closest('.act')) closePopover();
+  if (pop && !pop.contains(e.target as Node) && !(e.target as HTMLElement).closest('.act, [data-pop]')) closePopover();
 });
 
 /* ---------- delete sheet ---------- */
@@ -1942,7 +2125,11 @@ $('sheet-confirm').onclick = async () => {
   const r = await call('confirmDelete', { sessionId: pending.sessionId, projectDir: pending.projectDir });
   button.disabled = false;
   if (!r.ok) toast(r.error, 'error');
-  else toast(`Moved ${mb(r.result.bytesReclaimed)} to the Trash and removed ${r.result.historyRemoved} history line${r.result.historyRemoved === 1 ? '' : 's'}.`);
+  else {
+    const d = r.result.remote;
+    const remote = !d ? '' : d.ok ? (d.moved ? ` Its copy on ${R()} went to ~/.claude-trash there.` : '') : ` The copy on ${R()} stays: ${d.error}.`;
+    toast(`Moved ${mb(r.result.bytesReclaimed)} to the Trash and removed ${r.result.historyRemoved} history line${r.result.historyRemoved === 1 ? '' : 's'}.${remote}`, d && !d.ok ? 'error' : undefined);
+  }
   const kept = r.ok ? next?.dataset.id : pending.sessionId;
   closeSheet(null);
   lastFingerprint = '';
@@ -2026,6 +2213,17 @@ function setSort(mode: SortMode) {
   renderSort();
   renderList();
 }
+function setMachineFilter(next: 'mac' | 'remote' | null) {
+  machineFilter = next;
+  for (const [id, m] of [['on-all', null], ['on-mac', 'mac'], ['on-remote', 'remote']] as const) {
+    ($(id) as HTMLButtonElement).setAttribute('aria-pressed', String(machineFilter === m));
+  }
+  renderMachines();
+  renderList();
+}
+$('on-all').onclick = () => setMachineFilter(null);
+$('on-mac').onclick = () => setMachineFilter('mac');
+$('on-remote').onclick = () => setMachineFilter('remote');
 $('sort-recent').onclick = () => setSort('recent');
 $('sort-name').onclick = () => setSort('name');
 renderSort();
@@ -2093,6 +2291,76 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'r' && s.live && !remoteDown(s)) openPopover($('detail').querySelector('[data-act="reply"]') as HTMLElement ?? $('detail'), s, 'reply');
   if (event.key === 'a' && s.live && s.machine === 'remote' && !remoteDown(s)) attach(s);
   if (event.key === 'm' && hasRemote() && s.machine !== 'remote') moveFlow(s, 'remote');
+});
+
+/* ---------- layout: one scroll, resizable panes ---------- */
+
+// The list header and batch bar stay at the top of the column, and the list and panel fill
+// the rest of the window under them. Their heights change as they wrap, so they are measured.
+const contentEl = document.querySelector('.content') as HTMLElement;
+const mainEl = document.querySelector('.main') as HTMLElement;
+const listTop = () => (document.querySelector('.content-head') as HTMLElement).offsetHeight + $('batch').offsetHeight;
+new ResizeObserver(() => {
+  contentEl.style.setProperty('--head-h', `${(document.querySelector('.content-head') as HTMLElement).offsetHeight}px`);
+  contentEl.style.setProperty('--list-top', `${listTop()}px`);
+}).observe(document.querySelector('.content-head') as HTMLElement);
+new ResizeObserver(() => contentEl.style.setProperty('--list-top', `${listTop()}px`)).observe($('batch'));
+// The wheel moves the page first, until the list fills the window, then the list: a list that
+// scrolled on its own kept the cards and banner above it and left it a strip at the bottom.
+mainEl.addEventListener('wheel', (e) => {
+  if (e.deltaY <= 0 || e.ctrlKey) return;
+  const room = mainEl.getBoundingClientRect().top - contentEl.getBoundingClientRect().top - listTop();
+  if (room <= 1) return;
+  e.preventDefault();
+  contentEl.scrollTop += Math.min(e.deltaY, room);
+}, { passive: false });
+
+/** A handle that sets a width in px on <html>, by drag or arrow keys, remembered per handle. */
+function resizer(el: HTMLElement, { key, prop, min, max, fromX, wider }: {
+  key: string; prop: string; min: number; max: () => number; fromX: (x: number) => number; wider: 'ArrowLeft' | 'ArrowRight';
+}) {
+  const root = document.documentElement;
+  const apply = (px: number) => {
+    const top = Math.max(min, Math.round(max()));
+    const v = Math.min(Math.max(Math.round(px), min), top);
+    root.style.setProperty(prop, `${v}px`);
+    el.setAttribute('aria-valuemin', String(min)); el.setAttribute('aria-valuemax', String(top)); el.setAttribute('aria-valuenow', String(v));
+    return v;
+  };
+  const save = (v: number | null) => { try { if (v == null) localStorage.removeItem(key); else localStorage.setItem(key, String(v)); } catch { /* not remembered */ } };
+  const now = () => Number.parseFloat(getComputedStyle(root).getPropertyValue(prop)) || min;
+  try { const saved = Number(localStorage.getItem(key)); if (saved) apply(saved); } catch { /* none */ }
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('is-dragging'); document.body.classList.add('is-resizing');
+    const move = (ev: PointerEvent) => apply(fromX(ev.clientX));
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.classList.remove('is-dragging'); document.body.classList.remove('is-resizing');
+      save(now());
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up, { once: true });
+    el.addEventListener('pointercancel', up, { once: true });
+  });
+  el.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 96 : 24;
+    const to = e.key === wider ? now() + step : (e.key === 'ArrowLeft' || e.key === 'ArrowRight') ? now() - step
+      : e.key === 'Home' ? min : e.key === 'End' ? max() : null;
+    if (to == null) return;
+    e.preventDefault(); e.stopPropagation();
+    save(apply(to));
+  });
+  el.addEventListener('dblclick', () => { root.style.removeProperty(prop); save(null); el.removeAttribute('aria-valuenow'); });
+}
+resizer($('nav-split'), {
+  key: 'switchboard.nav.width', prop: '--nav-w', min: 180, max: () => Math.min(520, window.innerWidth * 0.45),
+  fromX: (x) => x - (document.querySelector('.nav') as HTMLElement).getBoundingClientRect().left, wider: 'ArrowRight',
+});
+resizer($('detail-split'), {
+  key: 'switchboard.detail.width', prop: '--detail-w', min: 300, max: () => mainEl.getBoundingClientRect().width - 320,
+  fromX: (x) => mainEl.getBoundingClientRect().right - x, wider: 'ArrowLeft',
 });
 
 refresh();

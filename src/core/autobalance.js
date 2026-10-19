@@ -42,6 +42,39 @@ const LOCAL_ONLY_INPUT = /\/Volumes\/|\bosascript\b|\bscreencapture\b|\bopen -a\
 // .git never syncs to the remote, so a chat that commits or pushes would stop at its next commit.
 const LOCAL_ONLY_GIT = /\bgit\s+(?:-C\s+\S+\s+)?(?:commit|push)\b/;
 
+// A background shell or agent still running dies with its chat when a move closes it, and a chat
+// can be idle while one runs. Each start names an id that the task's completion notice repeats
+// (12 of 12 agents and 14 of 15 shells in one chat; the 15th was still running). Monitors expire
+// without a notice, so they are left out. A start is a tool result that opens with the marker: the
+// marker quoted anywhere else (a chat writing this check and its test did) starts nothing.
+const TASK_START = /^(?:Command running in background with ID: (\w+)|Async agent launched successfully\.[\s\S]*?agentId: (\w+))/;
+const TASK_DONE = /<task-id>(\w+)<\/task-id>/g;
+const resultText = (c) => (typeof c?.content === 'string' ? c.content
+  : Array.isArray(c?.content) ? c.content.map((x) => x?.text ?? '').join('') : '');
+
+/**
+ * Pure: how many background tasks started in this transcript text since `since` (ms, the chat
+ * process's start: a restart kills its tasks without a notice) have not reported back.
+ */
+export function openBackgroundTasks(text, since = 0) {
+  const open = new Set();
+  const done = new Set();
+  for (const line of String(text).split('\n')) {
+    if (!line.includes('Command running in background with ID: ') && !line.includes('agentId: ') && !line.includes('<task-id>')) continue;
+    let e;
+    try { e = JSON.parse(line); } catch { continue; }
+    if (e?.type === 'assistant') continue;
+    for (const m of line.matchAll(TASK_DONE)) done.add(m[1]);
+    if (e?.type !== 'user' || !(Date.parse(e.timestamp ?? '') >= since) || !Array.isArray(e.message?.content)) continue;
+    for (const c of e.message.content) {
+      const m = c?.type === 'tool_result' ? resultText(c).match(TASK_START) : null;
+      if (m) open.add(m[1] ?? m[2]);
+    }
+  }
+  for (const id of done) open.delete(id);
+  return open.size;
+}
+
 /** Pure: the first local-only tool or path in these transcript entries, or null. */
 export function localOnlyUse(entries, mcpPrefixes = []) {
   const prefixes = [...LOCAL_ONLY_MCP, ...mcpPrefixes].map((p) => `mcp__${p}`);

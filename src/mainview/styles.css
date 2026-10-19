@@ -122,6 +122,7 @@ h1, h2 { font-weight: 500; }
 /* ---------- nav ---------- */
 
 .nav {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -228,6 +229,10 @@ h1, h2 { font-weight: 500; }
 .content { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); overflow-y: auto; }
 
 .content-head {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--surface);
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -341,6 +346,25 @@ h1, h2 { font-weight: 500; }
 .mcard-name[aria-pressed="true"] { text-decoration: underline; text-underline-offset: 3px; }
 .mcard-count { font-size: 13.5px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .mcard-action { margin-left: auto; }
+.mcard-info {
+  display: inline-grid; place-items: center;
+  width: 24px; height: 24px; margin-left: -4px;
+  border: 0; border-radius: 6px; background: none; padding: 0;
+  color: var(--text-3); cursor: pointer; touch-action: manipulation;
+}
+.mcard-info:hover, .mcard-info[aria-expanded="true"] { color: var(--text); background: var(--surface); }
+.mcard-info:focus-visible { outline: 2px solid var(--blue-soft); outline-offset: 1px; }
+.dh { width: 380px; }
+.dh-new { width: 100%; justify-content: center; margin-bottom: 10px; }
+.dh-list { display: grid; gap: 10px; margin-bottom: 10px; }
+.dh-what { font-size: 12.5px; color: var(--text-3); margin-bottom: 4px; }
+.dh-cmd { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dh-copy { height: 26px; padding: 0 10px; font-size: 13px; }
+.dh-cmd code {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12.5px;
+}
 .mcard-action .btn { height: 26px; padding: 0 10px; font-size: 13px; }
 .health { font-size: 12.5px; font-weight: 500; height: 20px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 999px; color: var(--text-3); background: var(--hover); white-space: nowrap; cursor: help; }
 .health[data-level="ok"] { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
@@ -349,6 +373,7 @@ h1, h2 { font-weight: 500; }
 .mcard-figures { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; margin-top: 6px; font-size: 13.5px; font-variant-numeric: tabular-nums; }
 .m { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .m-k { color: var(--text-3); }
+.mcard-uses { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .m-v { color: var(--text); }
 .m-v[data-warn="warn"] { color: var(--amber); }
 .m-v[data-warn="crit"] { color: var(--red); }
@@ -362,10 +387,11 @@ h1, h2 { font-weight: 500; }
 
 /* ---------- list + detail ---------- */
 
-/* The list keeps room to work in; when the window is too short for the cards
-   above it, the column scrolls instead of pushing the list under the bottom. */
-.main { flex: 1; display: flex; min-height: 220px; }
-.list { flex: 1; overflow-y: auto; padding: 4px 0 24px; overscroll-behavior: contain; min-width: 0; container-type: inline-size; }
+/* The list and the panel always get the window's full height, and the column
+   scrolls to them: with the machine cards and a restore banner above, they had
+   been squeezed into a strip at the bottom, each with a scrollbar of its own. */
+.main { flex: 0 0 auto; display: flex; height: calc(100% - var(--list-top, 0px)); min-height: 320px; }
+.list { flex: 1; overflow-y: auto; padding: 4px 0 24px; min-width: 0; container-type: inline-size; }
 .row.is-selected { --row-bg: var(--raised); box-shadow: inset 2px 0 0 var(--text-2); }
 .row.is-picked { --row-bg: color-mix(in srgb, var(--blue) 9%, var(--surface)); }
 .row.is-picked:hover { --row-bg: color-mix(in srgb, var(--blue) 13%, var(--surface)); }
@@ -376,15 +402,15 @@ h1, h2 { font-weight: 500; }
 .detail {
   width: 380px;
   flex: 0 0 380px;
-  border-left: 1px solid var(--border);
   overflow-y: auto;
   padding: 16px 18px 24px;
   background: var(--bg);
   animation: fade 140ms var(--ease) both;
 }
 .detail[hidden] { display: none; }
-/* Below 1100 px the panel floats over the list instead of squeezing names to a few letters. */
-@media (max-width: 1100px) {
+/* Beside the list, at the width its handle sets; it floats over the list only when
+   the window is too narrow for both (it had covered the list's columns below 1100 px). */
+@media (max-width: 720px) {
   .main { position: relative; }
   .detail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 5; box-shadow: -16px 0 32px rgba(0, 0, 0, 0.55); }
 }
@@ -483,7 +509,7 @@ h1, h2 { font-weight: 500; }
 .role[data-role="branch"] { color: var(--teal); }
 
 /* Batch actions for the family or project in view. */
-.batch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 20px 12px; }
+.batch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 20px 12px; position: sticky; top: var(--head-h, 0px); z-index: 6; background: var(--surface); }
 .batch.is-empty { padding: 0; }
 .batch-acts { display: contents; }
 .batch .btn { min-height: 28px; padding: 0 12px; font-size: 13.5px; }
@@ -803,7 +829,9 @@ h1, h2 { font-weight: 500; }
 .tdot[data-level="needs"] { background: var(--amber); }
 .nav-line .nav-count { color: var(--text-2); }
 .nav-line.is-chat { padding-left: calc(38px + var(--depth, 0) * 14px); }
-.nav-state { margin-left: auto; padding-left: 6px; font-size: 13.5px; color: var(--text-2); white-space: nowrap; }
+/* The state word gives way before the name: "CI_Sen… Needs you" cut the name first. */
+.nav-state { margin-left: auto; padding-left: 6px; font-size: 13.5px; color: var(--text-2); white-space: nowrap; flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nav-chat .nav-label { flex: 0 1 auto; }
 .nav-chat.is-needs .nav-state { color: var(--amber); }
 .nav-chat .nav-label { color: var(--text); }
 .nav-chat[aria-current="true"] .nav-label { color: var(--text); }
@@ -851,7 +879,7 @@ h1, h2 { font-weight: 500; }
 
 /* ---------- detail panel ---------- */
 
-.detail { width: min(420px, 100%); flex-basis: min(420px, 100%); padding: 18px 20px 28px; }
+.detail { width: var(--detail-w, 400px); flex-basis: var(--detail-w, 400px); max-width: 100%; padding: 18px 20px 28px; }
 .d-head { align-items: flex-start; }
 .d-title { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .d-name { font-size: 17px; font-weight: 600; line-height: 1.25; }
@@ -950,3 +978,25 @@ h1, h2 { font-weight: 500; }
   .acct-pill span { display: none; }
   .top { gap: 12px; }
 }
+
+/* ---------- resize handles ---------- */
+
+/* A 9 px target over a 1 px line, between the list and the panel and on the sidebar's edge. */
+.split { flex: 0 0 9px; margin: 0 -4px; position: relative; z-index: 4; cursor: col-resize; touch-action: none; }
+.split::before { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: var(--border); transition: background 100ms var(--ease); }
+.split:hover::before, .split.is-dragging::before { background: var(--text-3); }
+.split:focus-visible { outline: none; }
+.split:focus-visible::before { background: var(--blue); width: 2px; }
+.split[hidden] { display: none; }
+.nav > .split { position: absolute; top: 0; bottom: 0; right: -5px; width: 9px; margin: 0; z-index: 8; }
+.nav > .split::before { background: transparent; }
+.nav > .split:hover::before, .nav > .split.is-dragging::before { background: var(--text-3); }
+body.is-resizing { cursor: col-resize; user-select: none; }
+@media (max-width: 720px) { .main > .split { display: none; } }
+/* Delete sits apart from the everyday actions, at the far end, in red text; its confirm is the loud one. */
+.d-actions .d-delete { margin-left: auto; color: var(--red); }
+.d-actions .d-delete:hover { border-color: var(--red); }
+/* The remote's account, in the remote's colour; accounts it has no login for say so instead of offering a switch. */
+.badge[data-kind="remote"] { color: var(--teal); background: var(--teal-soft); }
+.acard-noremote { font-size: 13px; color: var(--text-3); white-space: nowrap; }
+.ap-sub .btn { margin-left: 8px; min-height: 26px; padding: 0 10px; font-size: 13px; vertical-align: middle; }

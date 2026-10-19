@@ -16,8 +16,11 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { readUsage, alertsDue } from '../core/usage.js';
 import { readLiveSessions } from '../core/registry.js';
-import { readRemoteLive } from '../core/remote.js';
+import { readRemoteLive, rememberRemoteTabs } from '../core/remote.js';
 import { readConfig } from '../core/config.js';
+import { checkResumes } from '../core/resume-check.js';
+import { closeTablessRemote } from '../core/remote-tabless.js';
+import { syncRelay } from '../core/peer-relay.js';
 import { writeSnapshot, readSnapshot } from '../core/snapshot.js';
 import { clearRestoreTasks } from '../restore/tasks.js';
 import { trimErrorLog } from './launchd.js';
@@ -173,6 +176,12 @@ export function run() {
     try {
       const sessions = pollOnce();
       try { usageAlerts(); } catch (err) { log(`usage check failed: ${err.message}`); }
+      try {
+        const tabs = rememberRemoteTabs();
+        closeTablessRemote({ remote: readRemoteLive(), tabs, notify: defaultNotify, say: log }).catch((err) => log(`remote tabless failed: ${err.message}`));
+      } catch (err) { log(`remote tabs failed: ${err.message}`); }
+      syncRelay({ remote: readRemoteLive(), mac: readLiveSessions() }).catch((err) => log(`relay failed: ${err.message}`));
+      try { checkResumes({ sessions: [...readLiveSessions({ interactiveOnly: false }), ...readRemoteLive().sessions], notify: defaultNotify, say: log }); } catch (err) { log(`resume check failed: ${err.message}`); }
       if (sessions.length !== lastCount) {
         log(`tracking ${sessions.length} session(s): ${sessions.map((s) => s.name).join(', ')}`);
         lastCount = sessions.length;
@@ -207,6 +216,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       trimErrorLog();
       const sessions = pollOnce();
       try { usageAlerts(); } catch (err) { log(`usage check failed: ${err.message}`); }
+      try {
+        const tabs = rememberRemoteTabs();
+        closeTablessRemote({ remote: readRemoteLive(), tabs, notify: defaultNotify, say: log }).catch((err) => log(`remote tabless failed: ${err.message}`));
+      } catch (err) { log(`remote tabs failed: ${err.message}`); }
+      syncRelay({ remote: readRemoteLive(), mac: readLiveSessions() }).catch((err) => log(`relay failed: ${err.message}`));
+      try { checkResumes({ sessions: [...readLiveSessions({ interactiveOnly: false }), ...readRemoteLive().sessions], notify: defaultNotify, say: log }); } catch (err) { log(`resume check failed: ${err.message}`); }
       log(`tick: captured ${sessions.length} session(s)`);
     } catch (err) {
       log(`tick failed: ${err.message}`);

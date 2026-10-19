@@ -3,7 +3,7 @@
   "displayName": "Claude Switchboard bridge",
   "description": "Lets the Claude Switchboard app open, reopen and type into the VS Code terminals its chats run in.",
   "publisher": "switchboard",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "license": "MIT",
   "engines": {
     "vscode": "^1.90.0"

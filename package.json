@@ -10,7 +10,7 @@
     "test": "TZ=Australia/Adelaide node --test test/*.test.js",
     "daemon": "node src/recorder/daemon.js",
     "gui": "electrobun build --env=stable",
-    "bridge": "cd vscode-bridge && bunx --bun @vscode/vsce@3 package --no-dependencies --skip-license --allow-missing-repository -o switchboard-bridge.vsix && code --install-extension switchboard-bridge.vsix --force",
+    "bridge": "for x in vscode-bridge vscode-remote vscode-names; do (cd $x && bunx --bun @vscode/vsce@3 package --no-dependencies --skip-license --allow-missing-repository -o $x.vsix && code --install-extension $x.vsix --force) || exit 1; done",
     "install-app": "bun run gui && scripts/install.sh"
   },
   "engines": {

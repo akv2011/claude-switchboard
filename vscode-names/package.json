@@ -1,0 +1,21 @@
+{
+  "name": "switchboard-names",
+  "displayName": "Claude Switchboard tab names",
+  "description": "Keeps a chat's terminal tab named after the chat, after /rename or /branch, here or on the remote.",
+  "publisher": "switchboard",
+  "version": "1.0.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Reads only Claude's session registry and Claude Switchboard's state in your home folder; it reads nothing from the workspace."
+    }
+  }
+}

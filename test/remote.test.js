@@ -17,7 +17,7 @@ process.env.HOME = fakeHome;
 const root = path.join(fakeHome, 'Projects');
 fs.mkdirSync(root, { recursive: true });
 
-const { parseProbe, tmuxName } = await import('../src/core/remote.js');
+const { parseProbe, tmuxName, ramUsers, withoutTabHere, rememberRemoteTabs, remoteTabShell, attachShells, attachCommand } = await import('../src/core/remote.js');
 const { pollOnce } = await import('../src/recorder/daemon.js');
 const { restorableWorkspaces } = await import('../src/core/snapshot.js');
 const { splitByMachine } = await import('../src/core/api.js');
@@ -83,4 +83,93 @@ test('an offer is split by machine for bring-up', () => {
   const { mac, remote } = splitByMachine([{ machine: 'remote' }, { machine: 'mac' }, {}]);
   assert.equal(remote.length, 1);
   assert.equal(mac.length, 2);
+});
+
+test('parseProbe reads each chat\'s tmux session, attached terminals, status time and the remote uid', () => {
+  const out = [
+    entry({ statusUpdatedAt: 1792395427858, messagingSocketPath: '/run/user/1000/cc-socks/100.sock' }),
+    '---MEM---', 'UID:1000', 'PANE:100:projects-92', 'CLIENTS:0:$44:projects-92', 'CLIENTS:2:$3:dev-server',
+    '---TMUX---', 'projects-92', 'dev-server',
+  ].join('\n');
+  const probe = parseProbe(out);
+  const [chat] = probe.sessions;
+  assert.equal(chat.tmux, 'projects-92', 'the session it really runs in, not its name');
+  assert.equal(chat.clients, 0);
+  assert.equal(chat.statusUpdatedAt, 1792395427858);
+  assert.equal(chat.messagingSocketPath, '/run/user/1000/cc-socks/100.sock');
+  assert.deepEqual(probe.tmuxIds, { $44: 'projects-92', $3: 'dev-server' });
+  assert.equal(probe.uid, 1000);
+});
+
+test('after a restart here, remote chats with no attached tab are the ones to reopen', () => {
+  const sessions = [{ sessionId: 'a', name: 'Shop_REA' }, { sessionId: 'b', name: 'Set up' }, { sessionId: 'cafe1234-x', name: null }];
+  const ps = [
+    "  901   812 /usr/bin/ssh -tq devbox tmux -u attach -t '=Shop_REA'",
+    '  812   700 /bin/zsh -l',
+    "  902   813 /usr/bin/ssh -tq devbox tmux -u attach -t '=Set_up_other'",
+    "  903   814 /bin/zsh -c pkill -f \"tmux -u attach -t '=Set_up'\"",
+  ].join('\n');
+  assert.deepEqual(withoutTabHere(sessions, ps).map((s) => s.sessionId), ['b', 'cafe1234-x'],
+    'a tab on another chat whose name starts the same, or a command that only names one, does not count');
+  assert.deepEqual(withoutTabHere(sessions, '').map((s) => s.sessionId), ['a', 'b', 'cafe1234-x'], 'no tabs at all: every one');
+});
+
+test('a tab running offload attach maps to its shell through the script that waits on ssh', () => {
+  const ps = ['  700     1 /bin/zsh -l', '  800   700 /bin/bash /Users/you/bin/offload attach Shop_REA',
+    "  801   800 /usr/bin/ssh -tq devbox tmux -u attach -t '=Shop_REA'"].join('\n');
+  assert.deepEqual([...attachShells(ps, {})], [['Shop_REA', 700]], 'the tab shell, not the offload script');
+});
+
+// offload attach and attachCommand hold the session by id, which a /rename keeps.
+const idAttach = (pid, ppid, id) => `  ${pid} ${ppid} /usr/bin/ssh -tq devbox [ "$(tmux display -p -t '${id}' '#{session_created}' 2>/dev/null)" = 1792395855 ] && exec tmux -u attach -t '${id}'; echo 'offload: that chat is no longer on the remote' >&2; exit 1`;
+
+test('a tab attached by tmux id is named from the last reading, so it follows a /rename', () => {
+  const ps = ['  700     1 /bin/zsh -l', '  800   700 /bin/bash /Users/you/bin/offload attach projects-ef', idAttach(801, 800, '$44')].join('\n');
+  assert.deepEqual([...attachShells(ps, { $44: 'Web_UI' })], [['Web_UI', 700]], 'the name now, not the one it was opened under');
+  assert.deepEqual([...attachShells(ps, {})], [], 'an id the reading has not seen yet is left out');
+  assert.equal(attachCommand('devbox', 'Web UI', '$44'), `ssh -tq 'devbox' 'tmux -u attach -t '\\''$44'\\'''`);
+  assert.equal(attachCommand('devbox', 'Web UI', 'nonsense'), `ssh -tq 'devbox' 'tmux -u attach -t '\\''=Web_UI'\\'''`, 'by name without a real id');
+});
+
+test('a tab is remembered while its shell lives, and under its chat\'s new name after a rename', () => {
+  const byName = (pid, name, shell) => `  ${pid} ${shell} /usr/bin/ssh -tq devbox tmux -u attach -t '=${name}'`;
+  rememberRemoteTabs(`${byName(901, 'Shop_REA', process.pid)}\n${byName(902, 'Gone', 999999)}`, {});
+  rememberRemoteTabs('', {});
+  assert.equal(remoteTabShell('Shop_REA'), process.pid, 'kept after the link dropped: its shell is still open');
+  assert.equal(remoteTabShell('Gone'), null, 'a closed tab is forgotten');
+  const ps = idAttach(911, process.pid, '$44');
+  rememberRemoteTabs(ps, { $44: 'projects-ef' });
+  rememberRemoteTabs(ps, { $44: 'Web_UI' });
+  assert.equal(remoteTabShell('Web_UI'), process.pid, 'closing the tab now closes Web_UI');
+  assert.equal(remoteTabShell('projects-ef'), null, 'the old name is dropped');
+});
+
+test('ramUsers names what holds the remote\'s memory and flags programs whose parent died', () => {
+  const ps = [
+    '1 0 9000 0 systemd',
+    '900 1 12000 1000 systemd',
+    '100 1 4000 1000 tmux: server',
+    '200 100 3000 1000 zsh',
+    '210 200 600000 1000 claude',
+    '211 210 300000 1000 node',
+    '300 100 3000 1000 zsh',
+    '310 300 700000 1000 node',
+    '400 900 170000 1000 terraform-provi',
+    '401 900 170000 1000 terraform-provi',
+    '500 1 50000 0 dockerd',
+    '600 650 400000 1000 mutagen-agent',
+    '650 640 8000 1000 sshd-session',
+  ].join('\n');
+  const uses = ramUsers({
+    psText: ps, panes: [[200, 'site_crawl'], [300, 'video-render']], uid: 1000, userSystemd: 900, tmpfsKb: 1_500_000,
+    sessions: [{ pid: 210, name: 'site_crawl', sessionId: '0a9f7eff' }],
+  });
+  const by = Object.fromEntries(uses.map((u) => [u.label, u]));
+  assert.equal(by['Chat site_crawl'].mb, 882, 'a chat counts its whole tmux pane, MCP servers included');
+  assert.equal(by['Job video-render'].mb, 687);
+  assert.deepEqual([by['terraform-provi'].count, by['terraform-provi'].leftover, by['terraform-provi'].mb], [2, true, 332]);
+  assert.equal(by['Folder sync (Mutagen)'].leftover, false);
+  assert.equal(by['Files in /tmp'].mb, 1465);
+  assert.equal(by.dockerd, undefined, "another user's daemon is the system's baseline, not shown");
+  assert.equal(uses[0].label, 'Files in /tmp', 'biggest first');
 });

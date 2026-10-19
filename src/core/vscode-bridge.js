@@ -79,7 +79,7 @@ export async function typeIntoTerminal({ shellPid, text, newline = true }, { roo
 }
 
 export async function runInVscodeTerminal(
-  { shellPid = null, cwd, name, text, window = null },
+  { shellPid = null, cwd, name, text, window = null, focus = true },
   { root = ROOT, openAfterMs = 4500, giveUpMs = 25_000, open = (dir) => code([dir]) } = {},
 ) {
   const requests = path.join(root, 'requests');
@@ -88,7 +88,7 @@ export async function runInVscodeTerminal(
   fs.mkdirSync(done, { recursive: true });
   const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.json`;
   const tmp = path.join(requests, `${id}.tmp`);
-  fs.writeFileSync(tmp, JSON.stringify({ shellPid, cwd, name, text, at: Date.now() }));
+  fs.writeFileSync(tmp, JSON.stringify({ shellPid, cwd, name, text, focus, at: Date.now() }));
   fs.renameSync(tmp, path.join(requests, id));
 
   const started = Date.now();

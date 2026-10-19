@@ -12,9 +12,10 @@ import { toolPath } from '../core/paths.js';
 import {
   getOverview, previewDelete, performDelete, restoreGroups, clearProject,
   openInVscode, recorder, enableAutoTasks, setPersistentSessions,
-  attachSession, moveSession, controlChat, newChat, searchAll, moveToLocal, peekRemoteScreen, readLastMessage, moveLiveSession, balanceToRemote, setAutoBalance, copyText,
+  attachSession, moveSession, controlChat, newChat, searchAll, moveToLocal, peekRemoteScreen, readLastMessage, moveLiveSession, balanceToRemote, setAutoBalance, closeChat, copyText,
 } from '../core/api.js';
 import { listAccounts, switchAccount, newChatAs } from '../core/accounts.js';
+import { remoteAccounts, useOnRemote, followLocalOnRemote } from '../core/remote-account.js';
 import { openAgent, stopAgent } from '../core/background.js';
 import { restartWith } from '../core/restart.js';
 import { assignGroup, createGroup, deleteGroup } from '../core/groups.js';
@@ -32,9 +33,9 @@ const rpc = BrowserView.defineRPC({
 
       previewDelete: ({ sessionId, projectDir }) => previewDelete({ sessionId, projectDir }),
 
-      confirmDelete: ({ sessionId, projectDir }) => {
+      confirmDelete: async ({ sessionId, projectDir }) => {
         try {
-          return { ok: true, result: performDelete({ sessionId, projectDir }) };
+          return { ok: true, result: await performDelete({ sessionId, projectDir }) };
         } catch (err) {
           return { ok: false, error: (err as Error).message };
         }
@@ -42,7 +43,7 @@ const rpc = BrowserView.defineRPC({
 
       restore: ({ groups, launch }) => restoreGroups(groups, { launch }),
 
-      attach: ({ name, cwd }) => attachSession({ name, cwd }),
+      attach: ({ name, cwd, sessionId, focus }) => attachSession({ name, cwd, sessionId, focus }),
 
       moveToRemote: ({ sessionId }) => moveSession(sessionId),
 
@@ -55,12 +56,15 @@ const rpc = BrowserView.defineRPC({
       moveLive: ({ sessionId, force }) => moveLiveSession({ sessionId, force }),
 
       moveToLocal: ({ sessionId }) => moveToLocal({ sessionId }),
+      closeChat: ({ sessionId, force }) => closeChat({ sessionId, force }),
 
       balance: ({ max }) => balanceToRemote({ max }),
 
       setAutoBalance: ({ enabled }) => ({ ok: true, config: setAutoBalance(enabled) }),
 
-      accounts: () => listAccounts(),
+      accounts: async () => ({ ...listAccounts(), remote: await remoteAccounts() }),
+      useOnRemote: ({ number }) => useOnRemote(number),
+      followLocalOnRemote: () => followLocalOnRemote(),
 
       switchAccount: ({ number }) => switchAccount(number),
 
