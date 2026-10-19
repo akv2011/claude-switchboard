@@ -31,6 +31,8 @@ A swapped-out idle chat echoed a keystroke in a median 0.09 s with RAM free, and
 
 ## 2. Operating system
 
+The remote may run Linux or macOS; so may two Macs, one helping the other. The probe reads each system's own counters (`/proc` on Linux, `sysctl` and `vm_stat` on a Mac), claude-sync puts the organization rules file where each system keeps it and rewrites your home folder in hook commands to the remote's, and `offload` uses GNU or BSD tools as each machine has them. A Mac remote needs Remote Login on (System Settings, General, Sharing), Homebrew's tmux, rsync and jq, and `export PATH=/opt/homebrew/bin:$PATH` in `~/.zshenv`, since a non-login ssh session does not read `~/.zprofile`. Keep it awake with `sudo pmset -c sleep 0`. The rest of this section is for a Linux box.
+
 A minimal Linux install with no desktop works best; these notes are from Arch Linux, and the same settings exist on any distribution. [LINUX-SETUP.md](LINUX-SETUP.md) is the full install from a blank disk, with `tools/linux-setup/configure-arch.sh` and `post-install.sh` doing the settings below.
 
 - **Headless and always on.** Boot to `multi-user.target`. Ignore the lid switch (`HandleLidSwitch=ignore` in `logind.conf`) and mask the sleep targets (`systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`). Blank the console (`consoleblank=60` on the kernel line).

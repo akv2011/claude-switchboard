@@ -407,8 +407,9 @@ cmd_move() {
   ssh "$HOST" "mkdir -p $(q "$pdir") $(q "$cwd")"
   # Never overwrite a newer remote copy: a chat that last ran there is ahead of the local
   # copy until transcripts are synced back. Copying over it would truncate the transcript.
-  remote_m=$(ssh "$HOST" "stat -c %Y $(q "$tp") 2>/dev/null || echo 0")
-  local_m=$(stat -f %m "$tp")
+  # GNU stat (Linux) or BSD stat (macOS), on whichever system each machine runs.
+  remote_m=$(ssh "$HOST" "stat -c %Y $(q "$tp") 2>/dev/null || stat -f %m $(q "$tp") 2>/dev/null || echo 0")
+  local_m=$(stat -c %Y "$tp" 2>/dev/null || stat -f %m "$tp")
   if [ "${remote_m:-0}" -gt "$local_m" ]; then
     echo "offload: $HOST's copy of $id is newer; resuming that one" >&2
   else

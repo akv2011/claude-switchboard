@@ -160,6 +160,7 @@ export function usageAlerts({ accounts = readUsage(), notify = defaultNotify, fi
  */
 export function notifyArgs(message, command = readConfig().notify.command) {
   if (command) return [command[0], [...command.slice(1), message]];
+  if (process.platform !== 'darwin') return ['notify-send', ['Claude Switchboard', message]];
   return ['/usr/bin/osascript', ['-e', 'on run argv', '-e', 'display notification (item 1 of argv) with title "Claude Switchboard"', '-e', 'end run', message]];
 }
 
@@ -176,11 +177,13 @@ export function run() {
     try {
       const sessions = pollOnce();
       try { usageAlerts(); } catch (err) { log(`usage check failed: ${err.message}`); }
-      try {
-        const tabs = rememberRemoteTabs();
-        closeTablessRemote({ remote: readRemoteLive(), tabs, notify: defaultNotify, say: log }).catch((err) => log(`remote tabless failed: ${err.message}`));
-      } catch (err) { log(`remote tabs failed: ${err.message}`); }
-      syncRelay({ remote: readRemoteLive(), mac: readLiveSessions() }).catch((err) => log(`relay failed: ${err.message}`));
+      if (readConfig().remote) {
+        try {
+          const tabs = rememberRemoteTabs();
+          closeTablessRemote({ remote: readRemoteLive(), tabs, notify: defaultNotify, say: log }).catch((err) => log(`remote tabless failed: ${err.message}`));
+        } catch (err) { log(`remote tabs failed: ${err.message}`); }
+        syncRelay({ remote: readRemoteLive(), mac: readLiveSessions() }).catch((err) => log(`relay failed: ${err.message}`));
+      }
       try { checkResumes({ sessions: [...readLiveSessions({ interactiveOnly: false }), ...readRemoteLive().sessions], notify: defaultNotify, say: log }); } catch (err) { log(`resume check failed: ${err.message}`); }
       if (sessions.length !== lastCount) {
         log(`tracking ${sessions.length} session(s): ${sessions.map((s) => s.name).join(', ')}`);
@@ -216,11 +219,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       trimErrorLog();
       const sessions = pollOnce();
       try { usageAlerts(); } catch (err) { log(`usage check failed: ${err.message}`); }
-      try {
-        const tabs = rememberRemoteTabs();
-        closeTablessRemote({ remote: readRemoteLive(), tabs, notify: defaultNotify, say: log }).catch((err) => log(`remote tabless failed: ${err.message}`));
-      } catch (err) { log(`remote tabs failed: ${err.message}`); }
-      syncRelay({ remote: readRemoteLive(), mac: readLiveSessions() }).catch((err) => log(`relay failed: ${err.message}`));
+      if (readConfig().remote) {
+        try {
+          const tabs = rememberRemoteTabs();
+          closeTablessRemote({ remote: readRemoteLive(), tabs, notify: defaultNotify, say: log }).catch((err) => log(`remote tabless failed: ${err.message}`));
+        } catch (err) { log(`remote tabs failed: ${err.message}`); }
+        syncRelay({ remote: readRemoteLive(), mac: readLiveSessions() }).catch((err) => log(`relay failed: ${err.message}`));
+      }
       try { checkResumes({ sessions: [...readLiveSessions({ interactiveOnly: false }), ...readRemoteLive().sessions], notify: defaultNotify, say: log }); } catch (err) { log(`resume check failed: ${err.message}`); }
       log(`tick: captured ${sessions.length} session(s)`);
     } catch (err) {

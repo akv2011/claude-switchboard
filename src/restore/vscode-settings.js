@@ -38,9 +38,10 @@ const KEY = 'task.allowAutomaticTasks';
 export const LOCATION_KEY = 'terminal.integrated.defaultLocation';
 
 export function userSettingsPath() {
-  return path.join(
-    os.homedir(), 'Library', 'Application Support', 'Code', 'User', 'settings.json',
-  );
+  // VS Code keeps user settings under the OS's own folder for app data.
+  return process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'Code', 'User', 'settings.json')
+    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Code', 'User', 'settings.json');
 }
 
 /**

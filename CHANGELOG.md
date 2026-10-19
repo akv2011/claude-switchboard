@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The second machine may be a Mac as well as a Linux box, and the main machine may run Linux for everything but the window. The remote's probe reads macOS counters through the same parser as this Mac's, with the right page size for swap rates; claude-sync puts the organization rules file where each system keeps it and rewrites the home folder in hook commands; `offload` works with GNU or BSD stat. On Linux the recorder is a systemd user timer, and the load, notifications (notify-send), clipboard (wl-copy or xclip), terminal and VS Code settings paths follow the system.
+
+- `scripts/setup.sh` installs everything from a fresh clone in one step: the VS Code extensions, offload, claude-sync and lazy-mcp, the window and the recorder, offload's config and a claude-sync timer when a remote is configured, and the relay hook when it is on. CLAUDE.md tells Claude Code how to run it and what to ask.
+
 - Chats on the two machines can message each other with Claude Code's own SendMessage, and `@<chat>` in a prompt reaches a chat on the other machine. Off unless `"relay": true` in config.json, and tools/relay/install.sh adds its hook. The recorder mirrors every chat's message socket onto the other machine over one ssh connection; Claude Code otherwise reaches only chats on its own machine, or Remote Control ones on the same account.
 
 - A chat's tab follows the chat's name after /rename or /branch (the switchboard-names extension). Tabs are opened with a fixed name, which VS Code keeps whatever the chat sends. The tab in use is renamed at once; another when it is opened or the window is left, since VS Code renames only the terminal in front.

@@ -64,12 +64,12 @@ A chat running on the second machine, with its live terminal screen refreshed ev
 
 ## Requirements
 
-- macOS on Apple silicon. Tested on macOS 26.6; older versions are untested.
+- macOS on Apple silicon for the window. Tested on macOS 26.6; older versions are untested. On Linux the recorder (a systemd user timer), the tools and the core run and pass the tests; the window is not built or tested there yet, and its wording still calls this machine the Mac.
 - Claude Code (the CLI), used in VS Code integrated terminals or any terminal. Tested with 2.1.301.
 - [Bun](https://bun.sh) to build the app (tested with 1.4.2; it pulls in Electrobun 1.18).
 - Node.js for the recorder (tested with 26.10).
 - VS Code with the bundled bridge extension (`vscode-bridge/`), for opening, reopening and typing into terminals.
-- Optional: a Linux machine reachable as an ssh host alias with key login, with `tmux`, `rsync` and Claude Code logged in. The app can map different home paths through config; `offload` needs the same paths on both machines. [Mutagen](https://mutagen.io) and `jq` on the main machine for `offload` and `claude-sync`.
+- Optional: a second machine, Linux or macOS, reachable as an ssh host alias with key login, with `tmux`, `rsync`, `jq` and Claude Code logged in. A Mac remote needs Remote Login on. The app can map different home paths through config; `offload` needs the same paths on both machines. [Mutagen](https://mutagen.io) and `jq` on the main machine for `offload` and `claude-sync`.
 - Optional: claude-swap (`cswap` on your PATH) for the Accounts tab.
 
 ## Install
@@ -77,12 +77,11 @@ A chat running on the second machine, with its live terminal screen refreshed ev
 ```sh
 git clone https://github.com/akv2011/claude-switchboard.git
 cd claude-switchboard
-bun install
-npm test                 # node --test, 197 tests, no network
-npm run bridge           # packages and installs the VS Code extension
-bun run gui              # builds build/stable-macos-arm64/Claude Switchboard.app
-scripts/install.sh       # copies the app to /Applications, installs the recorder, opens it
+scripts/setup.sh --check # what is missing
+scripts/setup.sh         # tests, the VS Code extensions, the tools, the window and the recorder
 ```
+
+`scripts/setup.sh` is safe to run again, and Claude Code can run it for you: CLAUDE.md tells it the steps, including the questions to ask about a second machine. By hand, the steps are `bun install`, `npm test`, `npm run bridge` (the three VS Code extensions), `bun run gui` and `scripts/install.sh`.
 
 The first run asks nothing. Arm the recorder from the title bar (Recorder off, then Arm).
 

@@ -173,3 +173,26 @@ test('ramUsers names what holds the remote\'s memory and flags programs whose pa
   assert.equal(by.dockerd, undefined, "another user's daemon is the system's baseline, not shown");
   assert.equal(uses[0].label, 'Files in /tmp', 'biggest first');
 });
+
+test('parseProbe reads a Mac remote through the Mac load parser, with its own page size', () => {
+  const vmStat = ['Mach Virtual Memory Statistics: (page size of 16384 bytes)', 'Pages free:                               20000.',
+    'Pages active:                            300000.', 'Pages inactive:                          290000.', 'Pages wired down:                        100000.',
+    'Pages purgeable:                          10000.', 'Anonymous pages:                         400000.', 'Pages occupied by compressor:             50000.',
+    'Swapins:                                  12345.', 'Swapouts:                                 23456.'].join('\n');
+  const out = [
+    entry({ messagingSocketPath: '/tmp/cc-socks/100.sock' }),
+    '---MEM---', 'HOME:/Users/you', 'OS:darwin', '---MACSYSCTL---', '17179869184',
+    'total = 2048.00M  used = 512.00M  free = 1536.00M  (encrypted)', '2', '{ 2.50 2.10 1.90 }', '10',
+    '---VMSTAT---', vmStat, '---ENDMAC---', 'UID:501', 'PANE:100:site_crawl',
+    '---TMUX---', 'site_crawl',
+    '---PS---', '100 1 400000 501 /Users/you/.local/bin/claude', '1 0 9000 0 /sbin/launchd', '300 1 300000 501 /Applications/Some Agent.app/Contents/MacOS/agent',
+  ].join('\n');
+  const p = parseProbe(out);
+  assert.equal(p.os, 'darwin');
+  assert.equal(p.memTotalMb, 16384);
+  assert.equal(p.memAvailableMb, 16384 - Math.round(((400000 - 10000 + 100000 + 50000) * 16384) / 1048576));
+  assert.deepEqual([p.swapTotalMb, p.swapUsedMb, p.pressure, p.load1, p.cores, p.pageSize, p.pswpout, p.uid], [2048, 512, 'warn', 2.5, 10, 16384, 23456, 501]);
+  assert.equal(p.sessions[0].tmux, 'site_crawl');
+  assert.ok(!p.uses.some((u) => u.leftover), "a Mac's launchd agents are never flagged as left behind");
+  assert.ok(p.uses.some((u) => u.label === 'agent'), 'a program by its name, not its path');
+});

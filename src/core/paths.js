@@ -71,8 +71,8 @@ export function toolPath(current = process.env.PATH) {
  * the app bundle is the fallback.
  */
 export function codeBin() {
-  const bundled = '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code';
-  return findBin('code') ?? (fs.existsSync(bundled) ? bundled : 'code');
+  const bundled = ['/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code', '/usr/share/code/bin/code', '/snap/bin/code'];
+  return findBin('code') ?? bundled.find((p) => fs.existsSync(p)) ?? 'code';
 }
 
 /**
