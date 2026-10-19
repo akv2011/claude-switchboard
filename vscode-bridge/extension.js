@@ -83,7 +83,9 @@ async function scan() {
       const term = reuse ? own : vscode.window.createTerminal({
         name: req.name, cwd: req.cwd, ...(group ? { location: { viewColumn: group.viewColumn, preserveFocus: true } } : {}),
       });
-      term.show(false);
+      // Several tabs at once (a restore, Attach N here) leave the keyboard where the person is typing:
+      // each new tab took it, mid-sentence in another chat.
+      term.show(req.focus === false);
       term.sendText(req.text, true);
       fs.writeFileSync(path.join(DONE, entry), JSON.stringify({ reused: Boolean(reuse), folder: mine[0] ?? null, at: Date.now() }));
       fs.rmSync(claimed, { force: true });

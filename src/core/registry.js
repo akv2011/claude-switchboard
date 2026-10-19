@@ -99,6 +99,7 @@ export function readLiveSessions(options = {}) {
       version: entry.version ?? null,
       kind: entry.kind ?? null,
       startedAt: entry.startedAt ?? null,
+      messagingSocketPath: entry.messagingSocketPath ?? null,
       verifiedReason: verdict.reason,
     });
   }
@@ -138,7 +139,7 @@ export function treeRss(psText, pids) {
   const parent = new Map();
   const rss = new Map();
   for (const line of String(psText).split('\n')) {
-    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)$/);
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)(?:\s|$)/);
     if (m) { parent.set(Number(m[1]), Number(m[2])); rss.set(Number(m[1]), Number(m[3])); }
   }
   const roots = new Set(pids.map(Number));

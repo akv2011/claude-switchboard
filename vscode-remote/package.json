@@ -1,0 +1,45 @@
+{
+  "name": "switchboard-remote",
+  "displayName": "Claude Switchboard remote tabs",
+  "description": "Makes a remote chat's tab act like a local chat's: closing it closes the chat, and an image pastes into it.",
+  "publisher": "switchboard",
+  "version": "1.0.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Acts only on terminals Claude Switchboard lists in ~/.claude-switchboard/remote-tabs.json; it reads nothing from the workspace."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "switchboard.paste",
+        "title": "Paste (an image goes to a remote chat as a file)"
+      },
+      {
+        "command": "switchboard.pasteCtrl",
+        "title": "Paste an image with Ctrl+V into a remote chat"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "switchboard.paste",
+        "key": "cmd+v",
+        "when": "terminalFocus && isMac"
+      },
+      {
+        "command": "switchboard.pasteCtrl",
+        "key": "ctrl+v",
+        "when": "terminalFocus"
+      }
+    ]
+  }
+}

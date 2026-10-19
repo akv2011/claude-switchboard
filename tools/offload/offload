@@ -275,7 +275,30 @@ cmd_claude() {
 cmd_attach() {
   [ $# -eq 1 ] || usage
   reach
-  exec ssh -tq "$HOST" "tmux -u attach -t $(q "=$(tmux_name "$1")")"
+  local t rc id created attach
+  t=$(tmux_name "$1")
+  # Hold the session by its id, which a rename keeps: the window renames a chat's session after
+  # /rename, and a reconnect by the old name then found nothing. A restart of the remote starts
+  # ids again from $0, so a reconnect checks the session is still the one created then; else the
+  # tab could come back on another chat.
+  read -r id created < <(ssh -T "$HOST" "tmux display -p -t $(q "=$t:") '#{session_id} #{session_created}'" 2>/dev/null) || true
+  if [[ $id =~ ^\$[0-9]+$ && $created =~ ^[0-9]+$ ]]; then
+    attach="[ \"\$(tmux display -p -t $(q "$id") '#{session_created}' 2>/dev/null)\" = $created ] && exec tmux -u attach -t $(q "$id"); echo 'offload: that chat is no longer on the remote' >&2; exit 1"
+  else
+    attach="tmux -u attach -t $(q "=$t")"
+  fi
+  # A dropped link (a Wi-Fi change, sleep) ends ssh with 255 while the chat runs on: reconnect.
+  # tmux leaves mouse reporting on when the link drops, and the shell then printed every mouse
+  # move as "35;70;..M": it is turned off after.
+  while :; do
+    rc=0
+    ssh -tq "$HOST" "$attach" || rc=$?
+    printf '\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l\033[?1015l\033[?2004l\033[?25h'
+    [ "$rc" = 255 ] || exit "$rc"
+    echo "offload: the link to $HOST dropped; reconnecting (Ctrl+C stops)" >&2
+    sleep 3
+    until ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" true 2>/dev/null; do sleep 5; done
+  done
 }
 
 # Prints: id, cwd, name, pid (0 when not open on this machine), transcript, then the

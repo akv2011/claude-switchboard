@@ -9,6 +9,10 @@
  * leaves it alone. On Linux a running chat picks up a switch on its next
  * message (claude-swap's README).
  *
+ * The Accounts page can also put the remote on an account by hand, for when the
+ * account it follows is spent there or has no login there; it then stays on that
+ * account until "Follow this Mac".
+ *
  * Runs only with a remote configured and claude-swap installed here; a remote
  * without claude-swap is left as it is. Register the remote's accounts under
  * this Mac's slot numbers, from setup tokens (`cswap add-token`), never copied
@@ -39,12 +43,77 @@ export function pickRemoteAccount(local, remote) {
 // Under the remote user's login shell, so PATH includes wherever claude-swap is installed there.
 const cswapOnRemote = (host, args) => sshScript(host, `exec "\${SHELL:-/bin/sh}" -lc 'cswap ${args}'`);
 
+const stampFile = () => path.join(stateDir(), 'remote-account.json');
+function readStamp() {
+  try { return JSON.parse(fs.readFileSync(stampFile(), 'utf8')); } catch { return {}; }
+}
+function writeStamp(next) {
+  try {
+    fs.mkdirSync(stateDir(), { recursive: true });
+    const tmp = `${stampFile()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(next));
+    fs.renameSync(tmp, stampFile());
+  } catch { /* checked again next tick */ }
+}
+const brief = (list) => list.map((a) => ({ number: a.number, email: a.email, active: a.active }));
+
+/**
+ * The remote's accounts, the one in use, and whether one was picked by hand. Read over ssh
+ * at most every 5 minutes unless `fresh`; otherwise from the last reading.
+ */
+export async function remoteAccounts({ fresh = false } = {}) {
+  const remote = remoteConfig();
+  if (!remote) return { ok: false, error: 'no remote is configured', accounts: [], pinned: null, at: null };
+  const last = readStamp();
+  if (!fresh && last.remote && Date.now() - (last.remoteAt ?? 0) < EVERY_MS) {
+    return { ok: true, accounts: last.remote, pinned: last.pinned ?? null, at: last.remoteAt };
+  }
+  try {
+    const listed = await cswapOnRemote(remote.host, 'list --json');
+    const accounts = brief(parseAccounts(JSON.parse(listed.stdout)));
+    const at = Date.now();
+    writeStamp({ ...readStamp(), remote: accounts, remoteAt: at });
+    return { ok: true, accounts, pinned: last.pinned ?? null, at };
+  } catch {
+    return { ok: false, error: `${remote.label} is not answering, or has no claude-swap`, accounts: last.remote ?? [], pinned: last.pinned ?? null, at: last.remoteAt ?? null };
+  }
+}
+
+/**
+ * Put the remote on account N by hand. It then stays there, no longer following this Mac,
+ * until followLocalOnRemote: an account spent on the remote, or one it has no login for,
+ * otherwise left it on the account it followed.
+ */
+export async function useOnRemote(number, { say = () => {} } = {}) {
+  const remote = remoteConfig();
+  const n = Number(number);
+  const list = await remoteAccounts({ fresh: true });
+  if (!remote || !list.ok) return { ok: false, error: list.error };
+  if (!list.accounts.some((a) => a.number === n)) {
+    return { ok: false, error: `account ${n} has no login on ${remote.label}; add it there with claude setup-token, then cswap add-token` };
+  }
+  const r = await cswapOnRemote(remote.host, `switch ${n}`);
+  if (!r.ok) return { ok: false, error: `could not switch ${remote.label}: ${r.error}` };
+  writeStamp({ ...readStamp(), pinned: n });
+  say(`remote account: switched ${remote.label} to account ${n} by hand; it no longer follows this Mac`);
+  return { ok: true, number: n, ...(await remoteAccounts({ fresh: true })) };
+}
+
+/** Let the remote follow this Mac's account again, checked now rather than in 5 minutes. */
+export async function followLocalOnRemote({ say = () => {} } = {}) {
+  const { pinned, ...rest } = readStamp();
+  writeStamp({ ...rest, at: 0 });
+  if (pinned) say(`remote account: follows this Mac's account again (was on account ${pinned} by hand)`);
+  await followLocalAccount({ say });
+  return { ok: true, ...(await remoteAccounts({ fresh: true })) };
+}
+
 export async function followLocalAccount({ say = () => {} } = {}) {
   const remote = remoteConfig();
   if (!remote || !cswapPath()) return;
-  const stamp = path.join(stateDir(), 'remote-account.json');
-  let last = {};
-  try { last = JSON.parse(fs.readFileSync(stamp, 'utf8')); } catch { /* first run */ }
+  const last = readStamp();
+  // Picked by hand on the Accounts page: left there until "Follow this Mac".
+  if (last.pinned) return;
   const local = listAccounts();
   if (!local.ok) return;
   const localActive = local.accounts.find((a) => a.active)?.number ?? null;
@@ -63,9 +132,7 @@ export async function followLocalAccount({ say = () => {} } = {}) {
     say(r.ok
       ? `remote account: switched ${remote.label} to account ${slot} (${email}), following this Mac's account ${localActive}`
       : `remote account: could not switch ${remote.label} to account ${slot}: ${r.error}`);
+    if (r.ok) onRemote = onRemote.map((a) => ({ ...a, active: a.number === slot }));
   }
-  try {
-    fs.mkdirSync(stateDir(), { recursive: true });
-    fs.writeFileSync(stamp, JSON.stringify({ at: Date.now(), localActive }));
-  } catch { /* checked again next tick */ }
+  writeStamp({ ...readStamp(), at: Date.now(), localActive, remote: brief(onRemote), remoteAt: Date.now() });
 }

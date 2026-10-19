@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- Chats on the two machines can message each other with Claude Code's own SendMessage, and `@<chat>` in a prompt reaches a chat on the other machine. Off unless `"relay": true` in config.json, and tools/relay/install.sh adds its hook. The recorder mirrors every chat's message socket onto the other machine over one ssh connection; Claude Code otherwise reaches only chats on its own machine, or Remote Control ones on the same account.
+
+- A chat's tab follows the chat's name after /rename or /branch (the switchboard-names extension). Tabs are opened with a fixed name, which VS Code keeps whatever the chat sends. The tab in use is renamed at once; another when it is opened or the window is left, since VS Code renames only the terminal in front.
+
+- A remote chat's tab acts like a local one's (the switchboard-remote extension): closing it closes the chat, and Cmd+V or Ctrl+V with an image copies the image to the remote and types its path. Claude reads a pasted image from the clipboard of the machine it runs on.
+
+- A remote chat that nothing shows is closed once it has been idle for 10 minutes; its history stays for a resume. One still working waits; one running only background jobs is not closed but named in a notification. A tab closed while the extension was not loaded, VS Code quitting or a restart here left such chats running for hours.
+
+- A remote tab holds its tmux session by id, so it keeps its chat through a /rename, and `offload attach` reconnects after a dropped link and turns mouse reporting off afterwards. After a restart here, "Attach N here" on the remote's card reopens the tabs of chats still running there, and a chat reattaches in the tab it last ran in instead of a second one.
+
+- The remote's card shows what holds its memory: each chat and job by its tmux session, files in /tmp when it is a RAM disk, and programs whose parent died. An info button lists the offload commands, with Copy, and opens New chat with the remote picked.
+
+- Close in the chat panel stops a running chat wherever it runs, and Delete is always there: a running chat is closed first. Deleting also moves the chat's copy on the remote to ~/.claude-trash there; copying between the machines never deletes, so it stayed.
+
+- The Accounts page shows the remote's account and can put the remote on one by hand ("Use on" the remote), for an account spent there or with no login there; it then stays until "Follow this Mac".
+
+- A chat runs in one place: Bring back, Open and the remote's restore skip a chat already running on either machine, under any tmux name. A chat that last ran on the remote fetches its transcript first when it reopens here, and waits while the remote is unreachable instead of opening from an older copy. A resume check flags a chat that resumed from an older point than its newest message.
+
+- Moves: a chat the remote never lists within 60 s (stuck at a question nobody sees) is stopped there and reopened here, so it is never on neither machine. A move refuses a chat whose background tasks it would stop. One picked by hand goes even after it used what only this Mac has, and the message names it. A project's first copy may take up to 30 minutes.
+
+- Several tabs opened at once (Bring back, Attach N here) open together, in order and beside the tab in use, without taking the keyboard.
+
+- Layout: the page scrolls as one, with the list header and selection bar staying on top; the sidebar and the chat panel are resizable by drag or arrow keys and remember their width; the panel floats over the list only below 720 px. The list filters by machine (All, Mac, the remote) on top of the current view. A family's `<name>_old` copies sit in its own Old row and stay out of whole-family actions. The restore banner says when the oldest chat closed as well as the newest.
+
+- tools/offload/lazy-mcp starts an MCP server only when a chat first uses it. Every chat starts its own copy of every configured server: a dozen browser-profile servers per chat held 18 GB on one 24 GB Mac.
+
+- Auto-balance reads chats' transcripts only on a tick that could move one.
+
 - A background chat (claude --bg) shows as running. Only interactive sessions counted, to keep the daemon's spare workers out; a spare has no conversation, so a bg session with a transcript now counts.
 
 - Installing waits for the old recorder job to stop before loading the new one. A load right after an unload could fail with launchctl status 5 and stop the install before it copied the app.

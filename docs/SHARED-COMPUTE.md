@@ -11,6 +11,9 @@ How to turn a spare laptop or desktop into a headless box that takes Claude Code
 | `claude-sync` | `tools/offload/claude-sync` | Copies your Claude Code setup to the remote every few minutes, and the remote's transcripts back. |
 | `tmux.conf` | `tools/offload/tmux.conf` | For the remote, so an attached chat looks and scrolls like a local one. |
 | `test_offload.sh` | `tools/offload/test_offload.sh` | 38 end-to-end checks against your real remote. |
+| `lazy-mcp` | `tools/offload/lazy-mcp` | Starts an MCP server only when a chat first uses it, so a server that runs on the other machine over ssh costs nothing per idle chat. |
+| The relay | `src/core/peer-relay.js`, `tools/relay/` | Lets chats on the two machines message each other (section 10). |
+| Tab extensions | `vscode-remote/`, `vscode-names/` | A remote chat's tab closes the chat when closed and takes pasted images; every chat's tab follows its name. |
 
 ## 1. The machine
 
@@ -126,3 +129,31 @@ restrict,command="/path/to/your-notifier --from-stdin",from="192.0.2.0/24" ssh-e
 - **The newer transcript wins.** Neither tool copies an older transcript over a newer one.
 - **Unreachable is not closed.** When the remote drops off the network (a router restart, a power cut), its chats stay listed as last seen, and nothing is offered for restore until it is truly gone.
 - **Check it end to end.** `tools/offload/test_offload.sh` runs 38 checks against your real remote: sync both ways, conflicts, ignores, the size guard, quoting of awkward arguments, exit codes, ttys, jobs, port forwards. It cleans up after itself on both machines.
+
+## 10. Chats that talk across machines
+
+Claude Code's SendMessage reaches chats on its own machine only (or Remote Control ones on the same account). With `"relay": true` in config.json and `tools/relay/install.sh` run once, the recorder mirrors every chat's message socket onto the other machine over one ssh connection, and a hook tells Claude where a chat on the other machine is:
+
+- `@build-bot run the tests` in a prompt on either machine reaches build-bot wherever it runs.
+- SendMessage to a chat's name, or a reply to a message from the other machine, goes to that chat's mirror.
+- Messages arrive as real cross-session messages, marked as from another Claude session, and the receiving chat's permission mode applies as usual.
+
+A mirror lives in `/tmp/cc-socks-<1000000 + uid>` on the other machine, a folder no chat binds its own socket in, so a Mac and a Linux box, or two Macs, never mix them up. New chats are reachable within about a minute. It rests on Claude Code accepting a message passed through ssh, which it does today.
+
+## 11. MCP servers that start when used
+
+Every chat starts its own copy of every configured MCP server when it opens. A dozen browser-profile servers per chat held 18 GB on a 24 GB Mac with 35 chats. `tools/offload/lazy-mcp` answers a chat's handshake and tool list from the server's last answer and starts the real server on the first tool call, so an idle chat costs nothing:
+
+```sh
+claude mcp add-json --scope user browser '{"command":"lazy-mcp","args":["browser","--","npx","@playwright/mcp@0.0.82"]}'
+```
+
+The same wrapper lets the remote use a server that only this machine can run, such as a signed-in browser profile, with no cost per idle chat there:
+
+```sh
+# on the remote
+claude mcp add-json --scope user browser '{"command":"lazy-mcp","args":["browser","--","ssh","-T","mac","exec playwright-mcp --extension"]}'
+```
+
+That needs the remote to log in to this machine over ssh, the other way round from section 4.
+

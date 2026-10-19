@@ -78,6 +78,8 @@ echo "PSWPOUT:$(awk '/^pswpout /{print $2}' /proc/vmstat)"
 # control here and \`offload attach\` find a chat by its name: rename the session
 # to match. Only sessions offload started a chat in (claude --name or --resume),
 # never an offload -d job. Needs jq on the remote; without it nothing is renamed.
+# First, so this reading already carries the new names. An open tab keeps its chat:
+# it holds the session by its id, which a rename keeps.
 command -v jq >/dev/null && tmux list-panes -a -F '#{pane_pid} #{session_name} #{pane_start_command}' 2>/dev/null | while read -r pane sess cmd; do
   case $cmd in *"claude --name"*|*"claude --resume"*) ;; *) continue ;; esac
   for f in "$HOME"/.claude/sessions/*.json; do
@@ -90,10 +92,17 @@ command -v jq >/dev/null && tmux list-panes -a -F '#{pane_pid} #{session_name} #
       tmux rename-session -t "=$sess" "$want"
   done
 done
+# What holds the memory: the tmux pane of each process tree, whose processes are ours, and /tmp when it is a RAM disk.
+tmux list-panes -a -F 'PANE:#{pane_pid}:#{session_name}' 2>/dev/null
+# Terminals attached to each session, from anywhere: a chat nothing shows is closed once idle (remote-tabless.js).
+tmux ls -F 'CLIENTS:#{session_attached}:#{session_id}:#{session_name}' 2>/dev/null
+echo "UID:$(id -u)"
+echo "USYSD:$(pgrep -u "$(id -u)" -x systemd | head -1)"
+[ "$(findmnt -n -o FSTYPE /tmp 2>/dev/null)" = tmpfs ] && echo "TMPFS:$(df -k --output=used /tmp | tail -1 | tr -d ' ')"
 echo "---TMUX---"
 tmux ls -F "#{session_name}" 2>/dev/null
 echo "---PS---"
-ps -e -o pid=,ppid=,rss=
+ps -e -o pid=,ppid=,rss=,uid=,comm=
 # tmux exits 1 with no server and grep exits 1 with no match. Neither is "down".
 exit 0
 `;
@@ -168,9 +177,11 @@ export function parseProbe(stdout, remote = null) {
         name: raw.name ?? null,
         nameSource: raw.nameSource ?? null,
         status: raw.status ?? null,
+        statusUpdatedAt: raw.statusUpdatedAt ?? null,
         version: raw.version ?? null,
         kind: raw.kind ?? null,
         startedAt: raw.startedAt ?? null,
+        messagingSocketPath: raw.messagingSocketPath ?? null,
         machine: 'remote',
       });
     } catch {
@@ -184,6 +195,19 @@ export function parseProbe(stdout, remote = null) {
   };
 
   const tmux = tmuxPart.split('\n').map((s) => s.trim()).filter(Boolean);
+  const panes = [...memPart.matchAll(/^PANE:(\d+):(.+)$/gm)].map((m) => [Number(m[1]), m[2].trim()]);
+  // The tmux session each chat really runs in. It can differ from the chat's name (a chat
+  // started unnamed and renamed later), and an attach by the name then finds nothing.
+  const pane = new Map(panes);
+  const parent = new Map([...psPart.matchAll(/^\s*(\d+)\s+(\d+)\s/gm)].map((m) => [Number(m[1]), Number(m[2])]));
+  for (const x of sessions) {
+    for (let p = x.pid, hops = 0; p > 1 && hops < 64; p = parent.get(p) ?? 0, hops += 1) if (pane.has(p)) { x.tmux = pane.get(p); break; }
+  }
+  const clientLines = [...memPart.matchAll(/^CLIENTS:(\d+):(?:(\$\d+):)?(.+)$/gm)];
+  const clients = new Map(clientLines.map((m) => [m[3].trim(), Number(m[1])]));
+  for (const x of sessions) x.clients = clients.get(x.tmux) ?? null;
+  // tmux session id to its name now: a tab attached by id follows its chat through a rename.
+  const tmuxIds = Object.fromEntries(clientLines.filter((m) => m[2]).map((m) => [m[2], m[3].trim()]));
   // Whole process tree per chat, as on the Mac; VmRSS of claude alone when ps gave nothing.
   const tree = psPart.trim() ? treeRss(psPart, sessions.map((x) => x.pid).filter(Boolean)) : new Map();
   for (const x of sessions) if (tree.has(x.pid)) x.rssMb = tree.get(x.pid);
@@ -192,7 +216,10 @@ export function parseProbe(stdout, remote = null) {
   return {
     sessions,
     tmux,
+    tmuxIds,
     home,
+    // The remote user's uid: the relay names the folder a remote chat's mirror goes in after it.
+    uid: Number(memPart.match(/^UID:(\d+)/m)?.[1] ?? NaN),
     memTotalMb: mem('MemTotal'),
     memAvailableMb: mem('MemAvailable'),
     swapTotalMb,
@@ -204,7 +231,60 @@ export function parseProbe(stdout, remote = null) {
     cores: load ? Number(load[2]) : null,
     tempC: Number(memPart.match(/TEMP:(\d+)/)?.[1] ?? NaN) || null,
     pswpout: Number(memPart.match(/PSWPOUT:(\d+)/)?.[1] ?? NaN),
+    uses: ramUsers({
+      psText: psPart,
+      panes,
+      sessions,
+      uid: Number(memPart.match(/^UID:(\d+)/m)?.[1] ?? NaN),
+      userSystemd: Number(memPart.match(/^USYSD:(\d+)/m)?.[1] ?? 0),
+      tmpfsKb: Number(memPart.match(/^TMPFS:(\d+)/m)?.[1] ?? 0),
+    }),
   };
+}
+
+// Programs that are meant to run with no parent of their own.
+const SERVICES = new Set(['systemd', '(sd-pam)', 'sshd-session', 'tmux: server', 'mutagen-agent', 'dbus-daemon', 'dbus-broker',
+  'pipewire', 'wireplumber', 'ollama', 'gpg-agent', 'ssh-agent']);
+const LABELS = { 'mutagen-agent': 'Folder sync (Mutagen)' };
+
+/**
+ * What holds the remote's memory, biggest first: each chat and offload job by its tmux session,
+ * the files in /tmp (when it is a RAM disk, which also holds deleted files a process still has
+ * open), and the rest of the user's processes by program. A program whose parent died is
+ * flagged: a tool's child processes left behind when their folder was deleted can hold gigabytes
+ * for days with nothing in view. Pure: the probe's ps text (pid ppid rss uid comm) and tmux panes in.
+ */
+export function ramUsers({ psText, panes = [], sessions = [], uid, userSystemd = 0, tmpfsKb = 0, top = 6 }) {
+  const procs = new Map();
+  for (const line of String(psText ?? '').split('\n')) {
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
+    if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), kb: Number(m[3]), uid: Number(m[4]), comm: m[5].trim() });
+  }
+  if (!procs.size || !Number.isFinite(uid)) return [];
+  const pane = new Map(panes);
+  const paneOf = (pid) => {
+    for (let x = pid, hops = 0; x > 1 && hops < 64; x = procs.get(x)?.ppid ?? 0, hops += 1) if (pane.has(x)) return x;
+    return null;
+  };
+  const chatPane = new Map(sessions.filter((s) => s.pid).map((s) => [paneOf(s.pid), s.name ?? s.sessionId?.slice(0, 8)]));
+  const groups = new Map();
+  const add = (key, label, kb, leftover = false) => {
+    const g = groups.get(key) ?? groups.set(key, { label, kb: 0, count: 0, leftover }).get(key);
+    g.kb += kb; g.count += 1;
+  };
+  for (const [pid, p] of procs) {
+    if (p.uid !== uid || !p.kb) continue;
+    const at = paneOf(pid);
+    if (at) { add(`tmux:${pane.get(at)}`, chatPane.has(at) ? `Chat ${chatPane.get(at)}` : `Job ${pane.get(at)}`, p.kb); continue; }
+    const orphan = (p.ppid === 1 || p.ppid === userSystemd) && !SERVICES.has(p.comm);
+    add(`${orphan ? 'left' : 'prog'}:${p.comm}`, LABELS[p.comm] ?? p.comm, p.kb, orphan);
+  }
+  if (tmpfsKb) add('tmpfs', 'Files in /tmp', tmpfsKb);
+  return [...groups.values()]
+    .map((g) => ({ label: g.label, mb: Math.round(g.kb / 1024), count: g.count, leftover: g.leftover }))
+    .filter((g) => g.mb >= 20)
+    .sort((a, b) => b.mb - a.mb)
+    .slice(0, top);
 }
 
 function readCache() {
@@ -286,6 +366,8 @@ export function readRemoteLive(options = {}) {
       memAvailableMb: null,
       tmux: cached?.tmux ?? [],
       home: cached?.home ?? null,
+      tmuxIds: cached?.tmuxIds ?? {},
+      uid: cached?.uid ?? null,
       error: err?.code === 'ETIMEDOUT' ? 'timed out' : 'unreachable',
     };
   }
@@ -318,9 +400,99 @@ export function sshScript(host, script, timeout = 30_000) {
   });
 }
 
-/** The shell command that attaches a terminal to a remote chat's tmux session. */
-export function attachCommand(host, name) {
-  return `ssh -tq ${q(host)} ${q(`tmux -u attach -t ${q(`=${tmuxName(name)}`)}`)}`;
+/**
+ * The shell command that attaches a terminal to a remote chat's tmux session. With the
+ * session's id from the last reading it holds the session by id, which a /rename keeps:
+ * the probe renames a renamed chat's session, and the tab then still knows its chat.
+ */
+export function attachCommand(host, name, id = null) {
+  const target = /^\$\d+$/.test(String(id ?? '')) ? id : `=${tmuxName(name)}`;
+  return `ssh -tq ${q(host)} ${q(`tmux -u attach -t ${q(target)}`)}`;
+}
+
+/** The tmux session id a chat runs in, from the last reading, or null. */
+export function cachedTmuxId(name) {
+  const t = tmuxName(name);
+  return Object.entries(readCache()?.tmuxIds ?? {}).find(([, n]) => n === t)?.[0] ?? null;
+}
+
+/** This machine's processes as `pid ppid command` lines, or '' when ps fails. */
+export function localProcesses() {
+  try { return execFileSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8' }); } catch { return ''; }
+}
+
+/** tmux session ids on the remote to their names, as of the last reading; never touches the network. */
+function cachedTmuxIds() {
+  return readCache()?.tmuxIds ?? {};
+}
+
+/**
+ * The shell each remote chat's tab runs in, by tmux name. A tab runs attachCommand
+ * (`ssh -tq host tmux -u attach -t '$<id>'`, or `'=<name>'`), directly or under
+ * `offload attach`, so the ssh's parent, or the parent of that, is the tab's shell. An
+ * id is named from the last reading: the session's name now, after any /rename. One the
+ * reading has not seen yet is left out until it has.
+ */
+export function attachShells(psText, ids = cachedTmuxIds()) {
+  const procs = new Map();
+  for (const line of psText.split('\n')) {
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+    if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), command: m[3] });
+  }
+  const shells = new Map();
+  for (const p of procs.values()) {
+    const target = /^\S*ssh\s/.test(p.command) ? p.command.match(/tmux(?: -u)? attach -t '?(=[A-Za-z0-9_-]+|\$\d+)/)?.[1] : null;
+    const name = target?.startsWith('=') ? target.slice(1) : ids[target];
+    if (!name) continue;
+    let shell = p.ppid;
+    if (/\/offload attach /.test(procs.get(shell)?.command ?? '')) shell = procs.get(shell).ppid;
+    shells.set(name, shell);
+  }
+  return shells;
+}
+
+/**
+ * Remote chats no terminal here is attached to. A restart of this machine closes every
+ * remote tab while the chats run on, and restore offers only closed chats, so these are
+ * the tabs it would not bring back.
+ */
+export function withoutTabHere(sessions, psText = localProcesses()) {
+  const attached = attachShells(psText);
+  return sessions.filter((s) => !attached.has(s.tmux ?? tmuxName(s.name ?? String(s.sessionId).slice(0, 8))));
+}
+
+const tabsFile = () => path.join(stateDir(), 'remote-tabs.json');
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+/**
+ * Remember the tab shell of every attached remote chat, kept while that shell lives. When
+ * the link drops (a remote restart, a long sleep), the tab falls back to its prompt with the
+ * chat's name on it, and reattaching in a new tab left two tabs of that name.
+ */
+export function rememberRemoteTabs(psText = localProcesses(), ids = cachedTmuxIds()) {
+  let known = {};
+  try { known = JSON.parse(fs.readFileSync(tabsFile(), 'utf8')); } catch { /* none yet */ }
+  const next = Object.fromEntries(Object.entries(known).filter(([, pid]) => alive(pid)));
+  for (const [name, pid] of attachShells(psText, ids)) {
+    // One tab shows one chat: a tab whose chat was renamed drops the old name.
+    for (const [old, shell] of Object.entries(next)) if (shell === pid && old !== name) delete next[old];
+    next[name] = pid;
+  }
+  try {
+    fs.mkdirSync(stateDir(), { recursive: true });
+    const tmp = `${tabsFile()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(next));
+    fs.renameSync(tmp, tabsFile());
+  } catch { /* the next tick tries again */ }
+  return next;
+}
+
+/** The shell of the tab a remote chat last ran in, while that shell is still open. */
+export function remoteTabShell(name) {
+  try {
+    const pid = JSON.parse(fs.readFileSync(tabsFile(), 'utf8'))[tmuxName(name)];
+    return pid && alive(pid) ? pid : null;
+  } catch { return null; }
 }
 
 /**
@@ -335,7 +507,7 @@ export function attachInTerminal(name, remote = remoteConfig()) {
   const dir = path.join(stateDir(), 'attach');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${tmuxName(name)}.command`);
-  fs.writeFileSync(file, `#!/bin/bash\nexec ${attachCommand(remote.host, name)}\n`, { mode: 0o755 });
+  fs.writeFileSync(file, `#!/bin/bash\nexec ${attachCommand(remote.host, name, cachedTmuxId(name))}\n`, { mode: 0o755 });
   return new Promise((resolve) => {
     execFile('open', [file], (err) => resolve(err ? { ok: false, error: err.message } : { ok: true, file }));
   });
@@ -392,7 +564,10 @@ export function transcriptFor(home, cwd, sessionId) {
  *   cwd is the remote folder; args are already shell-quoted claude arguments.
  */
 export async function startInTmux(host, items, { staggerSeconds = 2 } = {}) {
+  // A chat runs once: a resume is skipped when a live registry entry already holds its id, under any tmux name.
+  const running = (id) => `for f in $(grep -l ${q(`"sessionId":"${id}"`)} ~/.claude/sessions/*.json 2>/dev/null); do kill -0 "$(basename "$f" .json)" 2>/dev/null && exit 0; done; exit 1`;
   const lines = items.map((it, i) => `${i ? `sleep ${staggerSeconds}; ` : ''}mkdir -p ${q(it.cwd)}; `
+    + (it.sessionId ? `if ( ${running(it.sessionId)} ); then echo ${q(`skip ${it.id}`)}; el` : '')
     + `if tmux has-session -t ${q(`=${it.tmux}`)} 2>/dev/null; then echo ${q(`skip ${it.id}`)}; `
     // -u: a non-login ssh has no LANG, and tmux then draws every non-ASCII glyph as "_".
     + `else tmux -u new-session -d -s ${q(it.tmux)} -c ${q(it.cwd)} "\${SHELL:-/bin/sh}" -lc ${q(`claude ${it.args}`)} && echo ${q(`started ${it.id}`)}; fi`);
@@ -423,7 +598,7 @@ export async function resumeOnRemote(sessions, { staggerSeconds = 2, extraArgs =
     const cwd = s.remoteCwd ?? toRemotePath(s.cwd, remote, remoteHome);
     if (!cwd) return { ok: false, error: `${s.name ?? s.sessionId} has no folder on the remote`, started: 0, skipped: 0 };
     const label = s.name ?? s.sessionId.slice(0, 8);
-    items.push({ id: s.sessionId, tmux: tmuxName(label), cwd, args: `--name ${q(label)} --resume ${q(s.sessionId)}${extraArgs ? ` ${extraArgs}` : ''}` });
+    items.push({ id: s.sessionId, sessionId: s.sessionId, tmux: tmuxName(label), cwd, args: `--name ${q(label)} --resume ${q(s.sessionId)}${extraArgs ? ` ${extraArgs}` : ''}` });
   }
   return startInTmux(remote.host, items, { staggerSeconds });
 }
@@ -454,7 +629,8 @@ export async function pushToRemote(session, { remote, home }) {
   const made = await sshScript(remote.host, `mkdir -p ${dirs.map(q).join(' ')}`);
   if (!made.ok) return { ok: false, error: `could not make its folders on the remote: ${made.error}` };
   if (folder) {
-    const r = await rsync(`${folder.local}/`, `${remote.host}:${folder.remote}/`);
+    // A project's first copy runs inside the move, and a large one (gigabytes of data) outlasts 10 minutes.
+    const r = await rsync(`${folder.local}/`, `${remote.host}:${folder.remote}/`, { timeout: 30 * 60_000 });
     if (!r.ok) return { ok: false, error: `could not copy ${path.basename(folder.local)} to the remote: ${r.error}` };
   }
   if (transcript) {
@@ -564,4 +740,43 @@ export function stopOnRemote(pid, remote = remoteConfig()) {
   if (!remote || !Number.isInteger(n) || n <= 1) return Promise.resolve(false);
   return sshScript(remote.host, `kill -TERM ${n}; for i in $(seq 1 30); do kill -0 ${n} 2>/dev/null || exit 0; sleep 0.5; done; exit 1`)
     .then((r) => r.ok);
+}
+
+/**
+ * A deleted chat's copy on the remote, moved to ~/.claude-trash/<time>-<id> there, and its
+ * prompt-history lines dropped. Copies between the machines never delete, so a chat deleted
+ * here kept its transcript and checkpoints there. Refuses a chat still running on the remote.
+ * Resolves { ok, moved, to } or { ok: false, error }.
+ */
+export async function trashOnRemote({ sessionId, projectDir = null }, remote = remoteConfig()) {
+  if (!remote) return { ok: false, error: 'no remote machine is configured' };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(sessionId))
+    || (projectDir && !/^[A-Za-z0-9._-]+$/.test(projectDir))) return { ok: false, error: 'not a chat id' };
+  const rels = [projectDir && `projects/${projectDir}/${sessionId}.jsonl`, projectDir && `projects/${projectDir}/${sessionId}`,
+    `session-env/${sessionId}`, `file-history/${sessionId}`, `tasks/${sessionId}`].filter(Boolean);
+  const script = `set -u
+for f in $(grep -l '"sessionId":"${sessionId}"' ~/.claude/sessions/*.json 2>/dev/null); do kill -0 "$(basename "$f" .json)" 2>/dev/null && { echo running; exit 3; }; done
+dest=~/.claude-trash/$(date +%Y%m%d-%H%M%S)-${sessionId.slice(0, 8)}
+moved=0
+for r in ${rels.join(' ')}; do
+  [ -e ~/.claude/"$r" ] || continue
+  mkdir -p "$dest/$(dirname "$r")" && mv ~/.claude/"$r" "$dest/$r" && moved=$((moved + 1))
+done
+h=~/.claude/history.jsonl
+if [ -f "$h" ] && grep -q '"sessionId":"${sessionId}"' "$h"; then
+  grep -v '"sessionId":"${sessionId}"' "$h" > "$h.tmp-trash" && mv "$h.tmp-trash" "$h"
+fi
+echo "moved $moved to $dest"`;
+  const r = await sshScript(remote.host, script, 60_000);
+  const out = r.stdout.trim();
+  if (out === 'running') return { ok: false, error: `it is still running on ${remote.label}; close it there first` };
+  if (!r.ok) return { ok: false, error: `${remote.label} did not answer (${r.error})` };
+  return { ok: true, moved: Number(out.match(/^moved (\d+)/)?.[1] ?? 0), to: out.split(' to ')[1] ?? null };
+}
+
+/** End a remote chat's tmux session. Resolves true when it is gone. */
+export function stopRemoteTmux(name, remote = remoteConfig()) {
+  if (!remote) return Promise.resolve(false);
+  const t = q(`=${tmuxName(name)}`);
+  return sshScript(remote.host, `tmux kill-session -t ${t} 2>/dev/null; ! tmux has-session -t ${t} 2>/dev/null`, 10_000).then((r) => r.ok);
 }

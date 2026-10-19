@@ -123,3 +123,10 @@ test('a corrupt or hand-edited file reads as what is valid in it', () => {
   fs.writeFileSync(file, JSON.stringify({ groups: ['Ok', 'bad/one', 'Ok', 7], assign: { a: 'Ok', b: '', c: 'x/y' } }));
   assert.deepEqual(readGroups(), { groups: ['Ok'], assign: { a: 'Ok' } });
 });
+
+test('a chat renamed <name>_old stays in its family, marked old, so the family can list it apart', () => {
+  const s = [{ name: 'Shop_SEO_old', live: true }, { name: 'Shop_SEO' }, { name: 'Paper_numbers_old_2' }, { name: 'Bold_ui_older' }];
+  applyGroups(s, { groups: [], assign: {} }, '/Users/you');
+  assert.deepEqual(s.map((x) => [x.group, x.isOld]), [['Shop', true], ['Shop', false], ['Paper', true], ['Bold', false]],
+    'running or not; "_old" only as the suffix');
+});

@@ -35,6 +35,7 @@
 
   <main class="shell" id="shell" role="tabpanel" aria-labelledby="tab-chats">
     <nav class="nav" aria-label="Views, groups and folders">
+      <div class="split" id="nav-split" role="separator" aria-orientation="vertical" aria-label="Sidebar width" tabindex="0" title="Drag, or use the arrow keys, to resize. Double-click resets."></div>
       <div class="nav-scroll">
         <section class="nav-group">
           <h2 class="nav-title">Views</h2>
@@ -67,11 +68,17 @@
             <button class="sort-btn" id="sort-recent" type="button" aria-pressed="true">Recent</button>
             <button class="sort-btn" id="sort-name" type="button" aria-pressed="false">Name</button>
           </div>
+          <div class="sort" role="group" aria-label="Show chats on">
+            <button class="sort-btn" id="on-all" type="button" aria-pressed="true">All</button>
+            <button class="sort-btn" id="on-mac" type="button" aria-pressed="false">Mac</button>
+            <button class="sort-btn" id="on-remote" type="button" aria-pressed="false">Remote</button>
+          </div>
         </div>
       </div>
       <div class="batch is-empty" id="batch"><span class="batch-count" id="pick-count" role="status" aria-atomic="true"></span><span class="batch-acts" id="batch-acts"></span></div>
       <div class="main">
         <div class="list" id="rows" aria-busy="true"></div>
+        <div class="split" id="detail-split" role="separator" aria-orientation="vertical" aria-controls="detail" aria-label="Chat panel width" tabindex="0" title="Drag, or use the arrow keys, to resize. Double-click resets." hidden></div>
         <aside class="detail" id="detail" hidden aria-label="Chat details"></aside>
       </div>
     </section>

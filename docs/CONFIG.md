@@ -54,6 +54,14 @@ Folders that hold many projects. A chat started in one of these folders, rather 
 
 MCP servers that only this Mac can serve, such as a browser driver signed in to your own profiles. Each entry matches server names that start with it. Balance and auto-balance leave a chat that called one of them lately, as they do for Claude in Chrome, the Playwright and Chrome DevTools plugins, `/Volumes/`, `osascript`, `screencapture` and `open -a`. Letters, digits, `_` and `-`. Default: none.
 
+## relay
+
+`true` lets chats on the two machines message each other: the recorder mirrors every chat's message socket onto the other machine over one ssh connection, and `@<chat>` in a prompt or SendMessage to a chat's name reaches a chat there. Off by default, since it opens every chat's socket to the other machine. Also run `tools/relay/install.sh` once, for the hook that tells Claude where a chat on the other machine is; claude-sync copies it to the remote. Needs a remote.
+
+```json
+{ "remote": { "host": "devbox" }, "relay": true }
+```
+
 ## notify
 
 How the recorder tells you about usage limits and automatic moves. Default: a macOS notification through `osascript`. Set `command` to a program and its arguments; the message is added as the last argument.

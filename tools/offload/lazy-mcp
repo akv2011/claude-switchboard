@@ -1,0 +1,106 @@
+#!/usr/bin/env node
+// lazy-mcp <name> -- <command> [args...]
+//
+// A stdio MCP server that starts the real one only when a chat first uses it. Every Claude chat
+// starts its own copy of every configured server when it opens: a dozen browser-profile servers
+// per chat held 18 GB on a 24 GB Mac with 35 chats, and a server reached on the other machine
+// over ssh (`lazy-mcp name -- ssh -T host "server ..."`) costs that machine its memory for every
+// chat here. This answers the handshake and the tool list from the real server's last answer,
+// kept in ~/.cache/lazy-mcp/<name>.json, and starts the real server on the first other request,
+// normally a tool call; from then on it only passes messages through. With no saved answer yet
+// it starts the real server at once and saves what it says.
+//
+// Use it in a Claude Code MCP config in place of the server's own command:
+//   claude mcp add-json --scope user browser '{"command":"lazy-mcp","args":["browser","--","npx","@playwright/mcp@0.0.82"]}'
+// LAZY_MCP_LOG=<file> records what a client asks before the real server starts.
+//
+// ponytail: replays the saved protocol version; if Claude Code moves to a newer MCP version, the
+// first real start saves the new answer and the next chat gets it.
+'use strict';
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const readline = require('node:readline');
+
+const sep = process.argv.indexOf('--');
+const name = process.argv[2];
+const cmd = sep > 2 ? process.argv.slice(sep + 1) : [];
+if (!name || !cmd.length) { console.error('usage: lazy-mcp <name> -- <command> [args...]'); process.exit(2); }
+const cacheFile = path.join(os.homedir(), '.cache', 'lazy-mcp', `${name.replace(/[^\w.-]/g, '_')}.json`);
+let cache = null;
+try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch { /* first run */ }
+if (!cache?.initialize || !cache?.tools) cache = null;
+const cold = !cache; // decided once: a first run passes everything through and saves as it goes
+
+const out = (line) => process.stdout.write(`${line}\n`);
+function save(patch) {
+  cache = { ...(cache ?? {}), ...patch };
+  fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+  fs.writeFileSync(`${cacheFile}.tmp`, JSON.stringify(cache));
+  fs.renameSync(`${cacheFile}.tmp`, cacheFile);
+}
+
+let upstream = null;
+let ready = false; // true once every client line goes straight through
+let clientInit = null;
+const pending = [];
+const watch = new Map(); // a client request id whose answer is saved: 'initialize' or 'tools'
+const own = new Map(); // our own request ids to the real server, and what to do with the answer
+const toUpstream = (line) => upstream.stdin.write(`${line}\n`);
+
+function start(passthrough) {
+  upstream = spawn(cmd[0], cmd.slice(1), { stdio: ['pipe', 'pipe', 'inherit'] });
+  upstream.on('exit', (code) => process.exit(code ?? 1));
+  upstream.on('error', (err) => { console.error(`lazy-mcp ${name}: ${err.message}`); process.exit(1); });
+  readline.createInterface({ input: upstream.stdout }).on('line', (line) => {
+    let msg;
+    try { msg = JSON.parse(line); } catch { out(line); return; }
+    const answer = msg && msg.id !== undefined && !('method' in msg);
+    if (answer && own.has(msg.id)) { const then = own.get(msg.id); own.delete(msg.id); then(msg); return; }
+    if (answer && watch.has(msg.id) && msg.result) save({ [watch.get(msg.id)]: msg.result });
+    if (answer) watch.delete(msg.id);
+    out(line);
+  });
+  if (passthrough) return;
+  // Catch the real server up to where the client thinks it is, then let the held lines through.
+  own.set('lazy-mcp-init', (msg) => {
+    if (msg.result) save({ initialize: msg.result });
+    toUpstream(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }));
+    own.set('lazy-mcp-tools', (list) => {
+      const changed = list.result && JSON.stringify(list.result) !== JSON.stringify(cache.tools);
+      if (list.result) save({ tools: list.result });
+      if (changed) out(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
+      ready = true;
+      for (const line of pending.splice(0)) toUpstream(line);
+    });
+    toUpstream(JSON.stringify({ jsonrpc: '2.0', id: 'lazy-mcp-tools', method: 'tools/list', params: {} }));
+  });
+  toUpstream(JSON.stringify({ jsonrpc: '2.0', id: 'lazy-mcp-init', method: 'initialize', params: clientInit }));
+}
+
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  if (ready) { toUpstream(line); return; }
+  let msg;
+  try { msg = JSON.parse(line); } catch { return; }
+  // LAZY_MCP_LOG=<file> records what a client asks before the real server starts.
+  if (process.env.LAZY_MCP_LOG) fs.appendFileSync(process.env.LAZY_MCP_LOG, `${name} ${msg.method ?? 'answer'} ${JSON.stringify(msg.params ?? {}).slice(0, 120)}\n`);
+  if (msg.method === 'initialize') clientInit = msg.params;
+  if (cold) {
+    // Nothing saved: run the real server from the start and save its answers.
+    if (msg.method === 'initialize') watch.set(msg.id, 'initialize');
+    if (msg.method === 'tools/list') watch.set(msg.id, 'tools');
+    if (!upstream) start(true);
+    toUpstream(line);
+    return;
+  }
+  if (!('method' in msg)) { if (upstream) toUpstream(line); return; } // the client answering the real server
+  if (msg.method === 'initialize') { out(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: cache.initialize })); return; }
+  if (msg.method === 'notifications/initialized') return;
+  if (msg.method === 'tools/list') { out(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: cache.tools })); return; }
+  if (msg.method === 'ping') { out(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} })); return; }
+  pending.push(line);
+  if (!upstream) start(false);
+}).on('close', () => {
+  if (upstream) upstream.stdin.end(); else process.exit(0);
+});

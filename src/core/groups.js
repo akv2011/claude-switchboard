@@ -53,8 +53,16 @@ export function rootOf(cwd, home = os.homedir(), projectsRoots = []) {
 }
 
 /**
+ * An old copy: a chat renamed <name>_old once a newer chat took its name. It stays in
+ * its family's group, marked s.isOld, and the sidebar lists it under that group's own
+ * "Old" row, where it is easy to check and delete. Whole-group actions leave it out:
+ * opening a whole family had reopened its old copies next to the chats that replaced them.
+ */
+const OLD_NAME = /_old(?:[_-]?\d+)?$/i;
+
+/**
  * Pure. Sets s.group, s.autoGroup (where it goes when nothing is picked),
- * s.groupFrom ('pick', 'prefix' or 'folder') and s.root for the folder tree.
+ * s.groupFrom ('pick', 'prefix' or 'folder'), s.isOld and s.root for the folder tree.
  */
 export function applyGroups(sessions, config, { home = os.homedir(), projectsRoots = [] } = {}) {
   // A prefix is matched in any casing and labelled with its most common one: "Shop" over "shop".
@@ -69,6 +77,7 @@ export function applyGroups(sessions, config, { home = os.homedir(), projectsRoo
   for (const s of sessions) {
     const prefix = prefixOf(s.name);
     const pick = config.assign[keyOf(s.name)];
+    s.isOld = OLD_NAME.test(baseName(s.name));
     s.autoGroup = prefix ? label.get(prefix.toLowerCase()) : s.cwd ? path.basename(s.cwd) || s.cwd : 'No folder';
     s.group = pick ?? s.autoGroup;
     s.groupFrom = pick ? 'pick' : prefix ? 'prefix' : 'folder';

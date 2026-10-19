@@ -13,12 +13,12 @@ import path from 'node:path';
 import { withoutClaudeMarkers, PROJECTS_DIR, encodeCwd, codeBin, stateDir } from './paths.js';
 import { readConfig } from './config.js';
 import { scanSessions } from './sessions.js';
-import { readLiveSessions } from './registry.js';
+import { readLiveSessions, readRegistry } from './registry.js';
 import { pidExists } from './liveness.js';
-import { readTailEntries } from './jsonl.js';
+import { readTail, readTailEntries } from './jsonl.js';
 import { runInVscodeTerminal, typeIntoTerminal, parentPid, hasChildren, shq, bridgeInstalled } from './vscode-bridge.js';
 import { macLoad, health } from './load.js';
-import { decide, localOnlyUse, readConfig as readAutoConfig, readState as readAutoState, writeState as writeAutoState, setEnabled as setAutoBalance } from './autobalance.js';
+import { decide, localOnlyUse, openBackgroundTasks, readConfig as readAutoConfig, readState as readAutoState, writeState as writeAutoState, setEnabled as setAutoBalance } from './autobalance.js';
 import { readUsage } from './usage.js';
 import { cswapPath } from './accounts.js';
 import { launchFlags } from './restart.js';
@@ -29,7 +29,8 @@ import { readSnapshot, restorableWorkspaces } from './snapshot.js';
 import { readGroups, applyGroups } from './groups.js';
 import {
   readRemoteLive, remoteConfig, attachInTerminal, attachCommand, moveToRemote, pullFromRemote, resumeOnRemote, startOnRemote,
-  stopOnRemote, controlSession, peekScreen, sshScript, tmuxName, toRemotePath, transcriptFor, CONTROLS,
+  stopOnRemote, stopRemoteTmux, controlSession, peekScreen, sshScript, rsync, tmuxName, toRemotePath, transcriptFor, CONTROLS,
+  withoutTabHere, localProcesses, attachShells, rememberRemoteTabs, remoteTabShell, trashOnRemote, cachedTmuxId,
 } from './remote.js';
 import { writeRestoreTasks, clearRestoreTasks, resumeCommand, cleanEnv } from '../restore/tasks.js';
 import {
@@ -55,6 +56,8 @@ export function getOverview(options = {}) {
   // for 25 s, so this never costs more than one ssh per window refresh and
   // usually none. With no remote configured it costs nothing at all.
   const remote = readRemoteLive({ remote: config.remote });
+  const ps = config.remote ? localProcesses() : '';
+  if (config.remote) rememberRemoteTabs(ps);
   if (options.poll !== false) {
     try {
       pollOnce({ remote });
@@ -150,6 +153,7 @@ export function getOverview(options = {}) {
       configured: Boolean(config.remote),
       label: config.remote?.label ?? null,
       localProjectsRoot: config.remote?.localProjectsRoot ?? null,
+      relay: Boolean(config.remote && config.relay),
       reachable: remote.reachable,
       stale: remote.stale,
       checkedAt: remote.checkedAt,
@@ -160,6 +164,8 @@ export function getOverview(options = {}) {
       error: remote.error ?? null,
       load: remoteLoad(remote),
       health: health(remoteLoad(remote)),
+      uses: remote.reachable ? remote.uses ?? [] : [],
+      withoutTab: remote.reachable ? withoutTabHere(remote.sessions, ps).map((s) => ({ sessionId: s.sessionId, name: s.name, cwd: s.cwd })) : [],
     },
     configErrors: config.errors,
     recorder: launchd.status(),
@@ -186,9 +192,12 @@ async function reopenInVscode(root, sessions) {
   if (!fs.existsSync(root)) return { started: 0, error: `that folder no longer exists: ${root}` };
   let started = 0;
   let error = null;
-  for (const s of sessions) {
+  // Several at once keep the keyboard where it is, and go in reverse: VS Code puts each new tab
+  // right of the active one, so they land together in order instead of scattered among others.
+  const many = sessions.length > 1;
+  for (const s of many ? [...sessions].reverse() : sessions) {
     const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : root;
-    const r = await runInVscodeTerminal({ cwd, window: root, name: s.name ?? s.sessionId.slice(0, 8), text: resumeCommand(s.sessionId) });
+    const r = await runInVscodeTerminal({ cwd, window: root, name: s.name ?? s.sessionId.slice(0, 8), text: resumeCommand(s.sessionId), focus: !many });
     if (r.ok) started += 1;
     else error ??= r.error;
   }
@@ -197,8 +206,9 @@ async function reopenInVscode(root, sessions) {
 
 async function attachEach(root, sessions) {
   let attached = 0;
-  for (const s of sessions) {
-    const r = await attachSession({ name: s.name ?? s.sessionId.slice(0, 8), cwd: s.cwd && fs.existsSync(s.cwd) ? s.cwd : root, window: root });
+  const many = sessions.length > 1;
+  for (const s of many ? [...sessions].reverse() : sessions) {
+    const r = await attachSession({ name: s.name ?? s.sessionId.slice(0, 8), cwd: s.cwd && fs.existsSync(s.cwd) ? s.cwd : root, window: root, sessionId: s.sessionId, focus: !many });
     if (r.ok) attached += 1;
   }
   return attached;
@@ -211,10 +221,48 @@ async function attachEach(root, sessions) {
  * chats are resumed in tmux over there; their transcripts are on the remote's
  * disk, so nothing is copied.
  */
+/** Session id to where it runs now ('the Mac' or the remote's label), for every running chat. */
+function runningSomewhere(config) {
+  const where = new Map(readLiveSessions({ interactiveOnly: false }).map((s) => [s.sessionId, 'the Mac']));
+  if (config) for (const s of readRemoteLive({ remote: config, force: true }).sessions) where.set(s.sessionId, config.label);
+  return where;
+}
+
+/**
+ * A chat that last ran on the remote reopens here from the remote's copy, fetched first: the
+ * copy here lags by up to claude-sync's interval. False when the remote cannot be asked.
+ */
+async function fetchTranscript(s, config, remote) {
+  const remoteCwd = s.remoteCwd ?? toRemotePath(s.cwd, config, remote.home);
+  if (!remote.reachable || !remote.home || !remoteCwd) return false;
+  const localFile = s.file ?? path.join(PROJECTS_DIR, encodeCwd(s.cwd), `${s.sessionId}.jsonl`);
+  fs.mkdirSync(path.dirname(localFile), { recursive: true });
+  return (await rsync(`${config.host}:${transcriptFor(remote.home, remoteCwd, s.sessionId)}`, localFile, { excludes: [] })).ok;
+}
+
 export async function restoreGroups(groups, options = {}) {
   const written = [];
+  const config = remoteConfig();
   for (const group of groups) {
-    const { mac, remote } = splitByMachine(group.sessions);
+    // A chat runs in one place: opened twice, its transcript forks.
+    const running = runningSomewhere(config);
+    const already = group.sessions.filter((s) => running.has(s.sessionId));
+    if (already.length) written.push({ cwd: group.cwd, machine: 'mac', started: 0,
+      error: `${already.map((s) => `${s.name ?? s.sessionId.slice(0, 8)} is already running on ${running.get(s.sessionId)}`).join('; ')}` });
+    let { mac, remote } = splitByMachine(group.sessions.filter((s) => !running.has(s.sessionId)));
+    // A chat that last ran on the remote waits while the remote is unreachable, as Move here
+    // does, rather than fork from an older copy.
+    const fromRemote = config ? mac.filter((s) => s.lastMachine === 'remote') : [];
+    if (fromRemote.length) {
+      const reading = readRemoteLive({ remote: config });
+      const stale = [];
+      for (const s of fromRemote) if (!(await fetchTranscript(s, config, reading))) stale.push(s);
+      if (stale.length) {
+        mac = mac.filter((s) => !stale.includes(s));
+        written.push({ cwd: group.cwd, machine: 'mac', started: 0,
+          error: `${stale.map((s) => s.name ?? s.sessionId.slice(0, 8)).join(', ')} last ran on ${config.label}, which is unreachable; opened here now, ${stale.length === 1 ? 'it' : 'they'} would miss its last lines` });
+      }
+    }
     if (mac.length && options.launch !== false && bridgeInstalled()) {
       written.push({ cwd: group.cwd, machine: 'mac', via: 'vscode', ...(await reopenInVscode(group.cwd, mac)) });
     } else if (mac.length) {
@@ -242,16 +290,23 @@ export async function restoreGroups(groups, options = {}) {
  * terminal it last ran in when `shellPid` names one. Terminal.app only when
  * the chat has no folder on this Mac to open.
  */
-export function attachSession({ name, cwd, shellPid = null, window = null }) {
+export function attachSession({ name, cwd, shellPid = null, window = null, sessionId = null, focus = true }) {
   if (typeof name !== 'string' || !name) return Promise.resolve({ ok: false, error: 'no session named' });
   const remote = remoteConfig();
   if (!remote) return Promise.resolve({ ok: false, error: 'no remote machine is configured' });
+  // By id, the tmux session it really runs in: a chat started unnamed and renamed later runs
+  // under another session name, and an attach by its name found nothing.
+  const running = sessionId ? readRemoteLive({ remote }).sessions.find((s) => s.sessionId === sessionId)?.tmux : null;
+  if (running) name = running;
   if (!cwd || !fs.existsSync(cwd)) return attachInTerminal(name, remote);
+  // The tab it ran in last, when none is named: after a dropped link that tab sits at its prompt
+  // under the chat's name, and a new tab beside it made two of them.
+  const shell = shellPid ?? remoteTabShell(name);
   // Type into the old terminal only while its shell sits at a prompt. If
   // something runs there now (the person started claude again), that program
   // would get the text as input; open a new terminal instead.
-  const reuse = shellPid && !hasChildren(shellPid) ? shellPid : null;
-  return runInVscodeTerminal({ shellPid: reuse, cwd, window, name, text: attachCommand(remote.host, name) });
+  const reuse = shell && !hasChildren(shell) ? shell : null;
+  return runInVscodeTerminal({ shellPid: reuse, cwd, window, name, text: attachCommand(remote.host, name, cachedTmuxId(name)), focus });
 }
 
 /** Full-text search over the chats the window lists. */
@@ -353,7 +408,7 @@ const inFlight = () => {
  * @param {{live?:object, scanned?:object, remote:object, config:object|null}} args
  *   remote is the live reading, config the remote's settings.
  */
-export function movePreflight({ live, scanned, remote, config }) {
+export function movePreflight({ live, scanned, remote, config, tasks = null }) {
   if (!config) return 'no remote machine is configured';
   if (!remote.reachable) return `${config.label} is unreachable`;
   const id = String(scanned?.sessionId ?? live?.sessionId ?? '').toLowerCase();
@@ -365,6 +420,7 @@ export function movePreflight({ live, scanned, remote, config }) {
   if (!toRemotePath(cwd, config, remote.home)) return `its folder is not inside ${config.localProjectsRoot}, the folder that maps to ${config.label}`;
   const name = tmuxName(scanned?.name ?? live?.name ?? id.slice(0, 8));
   if ((remote.tmux ?? []).includes(name)) return `a chat named ${name} is already running on ${config.label}; rename one first`;
+  if (tasks) return `it has ${tasks}, and moving it would stop them`;
   return null;
 }
 
@@ -385,8 +441,11 @@ export async function moveLiveSession({ sessionId, force = false, reopen = true 
   const remote = readRemoteLive({ remote: config, force: true });
   const live = readLiveSessions({ interactiveOnly: false }).find((s) => s.sessionId === sessionId);
   const scanned = scanSessions({ remoteLive: remote }).sessions.find((s) => s.sessionId === sessionId);
-  const blocked = movePreflight({ live, scanned, remote, config });
+  const blocked = movePreflight({ live, scanned, remote, config, tasks: force || !scanned ? null : runningTasksOf(scanned) });
   if (blocked) return { ok: false, error: blocked };
+  // A chat picked by hand goes even when it lately used what only the Mac has; the toast names
+  // it, and Move here brings it back.
+  const needsLocal = scanned ? lateLocalUse(scanned, readConfig().localOnlyMcp) : null;
   if (live && ['busy', 'shell', 'waiting'].includes(live.status) && !force) {
     return { ok: false, busy: true, error: `${live.name ?? 'the chat'} is ${live.status === 'waiting' ? 'waiting at a prompt' : 'working'}` };
   }
@@ -414,21 +473,52 @@ export async function moveLiveSession({ sessionId, force = false, reopen = true 
       const back = await runInVscodeTerminal({ shellPid, cwd, name, text: resumeCommand(sessionId) });
       return { ok: false, rolledBack: back.ok, error: `${moved.error}. ${back.ok ? 'It is running on the Mac again, in its terminal.' : `Reopen it by hand: claude --resume ${sessionId}`}` };
     }
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       const after = readRemoteLive({ remote: config, force: true });
       const entry = after.sessions.find((s) => String(s.sessionId).toLowerCase() === key);
       if (entry) {
         // Bring it back where it was: the same VS Code terminal when it ran in one.
-        const reopened = live && reopen && cwd ? await attachSession({ name: entry.name ?? name, cwd, shellPid }) : null;
-        return { ok: true, verified: true, closedOnMac: Boolean(live), reopened };
+        const reopened = live && reopen && cwd ? await attachSession({ name: entry.tmux ?? entry.name ?? name, cwd, shellPid }) : null;
+        return { ok: true, verified: true, closedOnMac: Boolean(live), reopened, needsLocal, tmux: entry.tmux ?? null };
       }
       await sleep(3000);
     }
-    return { ok: true, verified: false, closedOnMac: Boolean(live), error: `moved, but ${config.label} has not listed it yet` };
+    // Claude on the remote never got as far as listing itself (stuck at a question nobody sees,
+    // such as trusting the folder), so the chat would be closed here and stuck there. Stop the
+    // remote copy and reopen it here, so it is never on neither machine.
+    const screen = await peekScreen(name, config);
+    const said = screen.ok ? screen.text.split('\n').map((l) => l.trim()).filter(Boolean).slice(-2).join(' / ') : '';
+    const why = `${config.label} did not start it within 60 s${said ? ` (its screen: ${said.slice(0, 160)})` : ''}`;
+    if (!(await stopRemoteTmux(name, config))) return { ok: false, error: `${why}, and it could not be stopped there; check its tmux session ${tmuxName(name)}` };
+    if (!live) return { ok: false, error: why };
+    const back = await runInVscodeTerminal({ shellPid, cwd, name, text: resumeCommand(sessionId) });
+    return { ok: false, rolledBack: back.ok, error: `${why}. ${back.ok ? 'It is running on the Mac again, in its terminal.' : `Reopen it by hand: claude --resume ${sessionId}`}` };
   } finally {
     releaseMove(key);
     moving.set(key, Date.now());
   }
+}
+
+/**
+ * Close a chat where it runs, the way a move does (SIGTERM, which Claude Code
+ * treats as a clean exit), so it can be deleted. Every copy of it, on either
+ * machine. A working chat is left alone: interrupt it first.
+ */
+export async function closeChat({ sessionId, force = false }) {
+  const config = remoteConfig();
+  const mac = readLiveSessions({ interactiveOnly: false }).filter((s) => s.sessionId === sessionId);
+  const there = config ? readRemoteLive({ remote: config, force: true }).sessions.filter((s) => s.sessionId === sessionId) : [];
+  const busy = [...mac, ...there].find((s) => ['busy', 'shell', 'waiting'].includes(s.status));
+  if (busy && !force) return { ok: false, busy: true, error: `${busy.name ?? 'the chat'} is working; interrupt it or let it finish first` };
+  for (const s of mac) {
+    try { process.kill(s.pid, 'SIGTERM'); } catch { /* already gone */ }
+    for (let i = 0; i < 30 && pidExists(s.pid); i += 1) await sleep(500);
+    if (pidExists(s.pid)) return { ok: false, error: `${s.name} did not close on the Mac after 15 s` };
+  }
+  for (const s of there) {
+    if (!(await stopOnRemote(s.pid, config))) return { ok: false, error: `it did not close on ${config.label} after 15 s` };
+  }
+  return { ok: true, closed: mac.length + there.length };
 }
 
 /**
@@ -461,12 +551,7 @@ export async function moveToLocal({ sessionId }) {
   moving.set(key, Date.now());
   try {
     // The VS Code terminal attached to it over ssh, so it comes back in the same tab.
-    let shellPid = null;
-    try {
-      const tmux = tmuxName(name);
-      const pid = execFileSync('pgrep', ['-f', `tmux( -u)? attach -t '=${tmux}`], { encoding: 'utf8' }).trim().split('\n')[0];
-      shellPid = pid ? parentPid(Number(pid)) : null;
-    } catch { /* not attached anywhere */ }
+    const shellPid = attachShells(localProcesses()).get(entry?.tmux ?? tmuxName(name)) ?? null;
     if (entry && !(await stopOnRemote(entry.pid, config))) return { ok: false, error: `it did not exit on ${config.label} after 15 s` };
     const pulled = await pullFromRemote({ sessionId, cwd, remoteCwd, localFile }, { remote: config, home: remote.home });
     if (!pulled.ok) {
@@ -487,10 +572,26 @@ export async function moveToLocal({ sessionId }) {
   }
 }
 
+const transcriptOf = (s) => (s.projectDir && s.sessionId ? path.join(PROJECTS_DIR, s.projectDir, `${s.sessionId}.jsonl`) : null);
+
+/** Background tasks a live chat still runs: a move closes the chat, and they stop with it. */
+function runningTasksOf(s) {
+  // A closed chat's tasks closed with it.
+  if (!s.live || !transcriptOf(s)) return null;
+  // ponytail: a task started more than 8 MB back is not seen; read the whole file if one ever is.
+  const startedAt = readRegistry().find((e) => e.pid === s.pid)?.startedAt ?? 0;
+  const tasks = openBackgroundTasks(readTail(transcriptOf(s), 8 * 1024 * 1024), startedAt);
+  return tasks ? `${tasks} background task${tasks === 1 ? '' : 's'} still running` : null;
+}
+
 /** What a chat here used lately that the remote cannot serve, from its last 1 MB. */
-function localOnlyOf(s, mcpPrefixes) {
-  if (!s.projectDir || !s.sessionId) return null;
-  return localOnlyUse(readTailEntries(path.join(PROJECTS_DIR, s.projectDir, `${s.sessionId}.jsonl`), 1024 * 1024), mcpPrefixes);
+function lateLocalUse(s, mcpPrefixes) {
+  return transcriptOf(s) ? localOnlyUse(readTailEntries(transcriptOf(s), 1024 * 1024), mcpPrefixes) : null;
+}
+
+/** Auto and Balance pick chats themselves, so they skip any chat that needs this Mac. */
+export function localOnlyOf(s, mcpPrefixes = []) {
+  return runningTasksOf(s) ?? lateLocalUse(s, mcpPrefixes);
 }
 
 /**
@@ -515,7 +616,10 @@ export async function autoBalanceTick({ notify, say = () => {} } = {}) {
   const remoteLive = readRemoteLive({ remote: remoteConfig });
   const remote = { reachable: remoteLive.reachable, level: health(remoteLoad(remoteLive)).level, availableMb: remoteLive.memAvailableMb };
   const { sessions } = scanSessions({ remoteLive });
-  for (const s of sessions) if (s.machine === 'mac' && s.live && s.status === 'idle') s.localOnly = localOnlyOf(s, localOnlyMcp);
+  // Read only when this tick could move a chat: up to 9 MB per idle chat on a Mac that is swapping.
+  if (state.strained >= config.strainedTicks) {
+    for (const s of sessions) if (s.machine === 'mac' && s.live && s.status === 'idle') s.localOnly = localOnlyOf(s, localOnlyMcp);
+  }
   const d = decide({ config, state, mac, remote, sessions });
   state.last = { at: Date.now(), wait: d.wait ?? null, moving: d.move?.name ?? null };
   writeAutoState(state);
@@ -692,8 +796,15 @@ export function previewDelete(session) {
   return planDelete(session);
 }
 
-export function performDelete(session) {
-  return deleteSession(session);
+/** Delete here, then the remote's copy, which copying between the machines would otherwise keep. */
+export async function performDelete(session) {
+  const mac = deleteSession(session);
+  const config = remoteConfig();
+  if (!config) return mac;
+  const remote = readRemoteLive({ remote: config }).reachable
+    ? await trashOnRemote(session, config)
+    : { ok: false, error: `${config.label} is unreachable; its copy stays until you delete it again` };
+  return { ...mac, remote };
 }
 
 /**
