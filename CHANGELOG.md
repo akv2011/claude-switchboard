@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A banner when a chat needs you: `tools/notify/install.sh` adds a Claude Code hook for turn ends, questions, permission prompts, plans to approve and API errors. Background turns ping only when they address you or report a problem or a finished job, at most hourly per kind. On the remote, `--forward-to` sends its banners to your main machine over a key that can only post one.
+
 - `offload move` resumes a chat under its own title. A bare resume sometimes registered a name made from the folder, so the moved chat answered to that.
 
 - With the relay on, the `@` list and ListAgents in a chat offer the other machine's chats as well as this machine's. They read only this machine's session records, so the relay writes a stand-in record for each chat on the other machine.

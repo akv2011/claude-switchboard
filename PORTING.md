@@ -10,7 +10,7 @@ This repository is the generalized, public form of a private working copy. Chang
    - the private machine CLI is `tools/offload/offload` here, and its sync job is `tools/offload/claude-sync`;
    - the second machine is `remote` (config `remote.label` for display), never a machine name;
    - the private machine CLI's moves, attaches and starts are `src/core/remote.js` functions;
-   - personal notifiers become `notifyArgs()` in `src/recorder/daemon.js`;
+   - personal notifiers become `notifyArgs()` in `src/recorder/daemon.js`; the private chat notifier hook is `tools/notify/switchboard_notifier.py`, with the second machine's forward target in `notify.json`, never in the code;
    - hard-coded folders become `readConfig().projectsRoots` or `remote.localProjectsRoot`.
 3. Rewrite comments that cite a dated personal incident as the general technical reason.
 4. Replace test fixtures that use real chat, project or account names with invented ones that keep the same structure (casing, separators, counts).

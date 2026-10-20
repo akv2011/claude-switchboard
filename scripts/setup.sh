@@ -123,3 +123,4 @@ fi
 
 step "done"
 echo "Open Claude Switchboard; config: ~/.config/claude-switchboard/config.json (docs/CONFIG.md)."
+echo "For a banner whenever a chat needs you: tools/notify/install.sh (docs/SHARED-COMPUTE.md, section 8)."
