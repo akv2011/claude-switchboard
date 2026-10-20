@@ -27,6 +27,7 @@ Two parts:
 - Reply, or interrupt with Esc, from the window. Typing goes only into the terminal the chat runs in, and a reply waits until the chat is idle.
 - Change a chat's model, effort or permission mode. The chat restarts idle with session-only launch flags, so your saved defaults and other chats stay as they are.
 - New chat: pick a folder, name, model, effort, permission mode, account and machine.
+- A banner when a chat needs you (`tools/notify/install.sh`): it finished a turn you started, asks a question, waits on a permission prompt or a plan, hits an API error, or a background turn reports a problem or a finished job. Routine background reports stay quiet, and the same kind of ping repeats at most hourly. On a second machine the banners come to your main one.
 
 **Share the work with a second machine (optional)**
 - Configure an ssh-reachable Linux box that has tmux and Claude Code. The window shows both machines' memory, swap, pressure and load.

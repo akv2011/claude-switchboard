@@ -13,6 +13,7 @@ How to turn a spare laptop or desktop into a headless box that takes Claude Code
 | `test_offload.sh` | `tools/offload/test_offload.sh` | 38 end-to-end checks against your real remote. |
 | `lazy-mcp` | `tools/offload/lazy-mcp` | Starts an MCP server only when a chat first uses it, so a server that runs on the other machine over ssh costs nothing per idle chat. |
 | The relay | `src/core/peer-relay.js`, `tools/relay/` | Lets chats on the two machines message each other (section 10). |
+| The notifier | `tools/notify/` | A Claude Code hook that shows a banner when a chat needs you, and sends the remote's banners to your main machine (section 8). |
 | Tab extensions | `vscode-remote/`, `vscode-names/` | A remote chat's tab closes the chat when closed and takes pasted images; every chat's tab follows its name. |
 
 ## 1. The machine
@@ -117,13 +118,25 @@ A big swap with no traffic is not strain: macOS keeps swapped pages after pressu
 
 ## 8. Notifications back to your main machine
 
-Claude Code hooks on the remote can tell you when a chat needs you, but a banner on a headless box helps nobody. Send it back over ssh with a key that can do nothing else: in your main machine's `~/.ssh/authorized_keys`,
+`tools/notify/install.sh` adds `switchboard_notifier.py` to your Claude Code hooks: a banner (with your alert sound on macOS, `notify-send` on Linux) when a turn you started ends, when a chat asks a question, waits on a permission prompt or a plan, or dies on an API error, and when a turn you did not start (a scheduled check, a background job, another chat's message) addresses you, asks something, or reports a problem or a finished job. The rest stays quiet, and the same kind of ping from one chat repeats at most hourly. A chat can also ping on purpose, for a job no hook sees: `python3 ~/.claude/hooks/switchboard_notifier.py "Done: nightly build, 412 tests"`. It makes no model call, runs in about 0.2 s and never fails the chat. `claude-sync` copies the hook and its settings to the remote.
 
-```
-restrict,command="/path/to/your-notifier --from-stdin",from="192.0.2.0/24" ssh-ed25519 AAAA... remote-notify
-```
+A banner on a headless remote helps nobody, so the remote sends its banners to your main machine over ssh, with a key that can do nothing else:
 
-`restrict` turns off forwarding, ptys and agent access; `command=` means the key can only run your notifier; `from=` limits it to your LAN. The remote's hook pipes a one-line message into `ssh -i ~/.ssh/notify_key you@main-machine`.
+1. On the remote, make the key: `ssh-keygen -t ed25519 -N '' -f ~/.ssh/notify_key -C remote-notify`.
+2. On the main machine, add its public half to `~/.ssh/authorized_keys`, locked to the notifier:
+
+   ```
+   restrict,command="python3 /Users/you/.claude/hooks/switchboard_notifier.py --post-stdin",from="192.0.2.0/24,100.64.0.0/10" ssh-ed25519 AAAA... remote-notify
+   ```
+
+   `restrict` turns off forwarding, ptys and agent access; `command=` means the key can only post a banner; `from=` limits it to your LAN and, if you use Tailscale, its address range, so banners still arrive when you are away from home.
+3. On the remote, from a copy of this repository: `tools/notify/install.sh --forward-to you@main.local you@100.64.0.1`. It writes `~/.config/claude-switchboard/notify.json`; each address is tried in turn. Without a copy there, write the file yourself:
+
+   ```json
+   {"forward": {"to": ["you@main.local", "you@100.64.0.1"], "key": "~/.ssh/notify_key", "label": "devbox"}}
+   ```
+
+The banner then shows on the main machine with "@ devbox" after the project name. A forward that fails is logged in `~/.claude/hooks/switchboard-notify.log` on the remote. Test the whole path from the remote with `python3 ~/.claude/hooks/switchboard_notifier.py "Done: test banner"`.
 
 ## 9. Rules that keep it safe
 
