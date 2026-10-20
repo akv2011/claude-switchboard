@@ -92,3 +92,9 @@ test('a session with no procStart falls back to existence rather than dying', ()
   assert.equal(verdict.alive, true);
   assert.match(verdict.reason, /no procStart/);
 });
+
+test('a live chat still verifies beside a pid above the range ps accepts (the relay\'s stand-ins)', () => {
+  const live = verifyLiveness([{ pid: 903096916 }, { pid: process.pid, procStart: ownProcStartUtc() }]);
+  assert.equal(live.get(process.pid).alive, true, 'macOS ps exits 1 on 903096916 and used to blank every pid in the call');
+  assert.equal(live.get(903096916).alive, false);
+});

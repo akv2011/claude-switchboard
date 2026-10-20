@@ -139,6 +139,7 @@ Claude Code's SendMessage reaches chats on its own machine only (or Remote Contr
 - `@build-bot run the tests` in a prompt on either machine reaches build-bot wherever it runs.
 - SendMessage to a chat's name, or a reply to a message from the other machine, goes to that chat's mirror.
 - Messages arrive as real cross-session messages, marked as from another Claude session, and the receiving chat's permission mode applies as usual.
+- The `@` list and ListAgents offer the other machine's named chats too, labelled "on this machine". They read only `~/.claude/sessions/<pid>.json`, so the relay writes a stand-in record there for each: pid 900000000 plus the chat's pid, above any real pid, and a `pidDomain` that is not this machine's, which makes Claude Code list the chat while its mirror answers and never delete the file.
 
 A mirror lives in `/tmp/cc-socks-<1000000 + uid>` on the other machine, a folder no chat binds its own socket in, so a Mac and a Linux box, or two Macs, never mix them up. New chats are reachable within about a minute. It rests on Claude Code accepting a message passed through ssh, which it does today.
 

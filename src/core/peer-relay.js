@@ -13,6 +13,9 @@
  * switchboard_relay.py, a Claude Code hook, reads it to tell a chat where an @-named chat on the
  * other machine is, and to send to a name or a `from` address that only the other machine has.
  *
+ * Claude Code's @ list and ListAgents read only ~/.claude/sessions/<pid>.json, so each machine
+ * also gets a stand-in record per named chat on the other one (standInRecord).
+ *
  * ponytail: rests on Claude Code accepting a message relayed through ssh, which its receiver
  * does today (it records the relay's pid). If it starts asking each sender for a token, relayed
  * messages are dropped and this needs another way in.
@@ -21,13 +24,47 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { stateDir } from './paths.js';
+import { spawn, spawnSync } from 'node:child_process';
+import { SESSIONS_DIR, stateDir } from './paths.js';
 import { readConfig } from './config.js';
 
 const ctl = () => path.join(stateDir(), 'relay.ctl');
 export const MIRROR_BASE = 1_000_000;
 const SOCKET = /^\/\S+\/([\w-]+\.sock)$/;
+// Above any real pid (Linux pid_max is at most 4194304, macOS 99998): no liveness check here or in
+// Claude Code finds it alive, so nothing counts it as a local chat or its name as taken.
+const STAND_IN_PID = 900_000_000;
+
+/**
+ * Pure. Claude Code's record for a chat on the other machine, at its mirror. A pidDomain that is not
+ * this machine's makes Claude Code skip the pid check, list the chat while the mirror answers, and
+ * never delete the file. No sessionId, so a resume or compaction never reads the chat as held here;
+ * no procStart, so a send never expects the relay's ssh to be that process.
+ */
+export function standInRecord(s, sock, machine) {
+  return {
+    pid: STAND_IN_PID + s.pid, name: s.name, cwd: s.cwd, kind: 'interactive', messagingSocketPath: sock,
+    pidDomain: `relay:${machine}`, relayMirror: machine, startedAt: s.startedAt ?? 0,
+    ...(s.status && { status: s.status }), ...(s.statusUpdatedAt && { statusUpdatedAt: s.statusUpdatedAt }),
+  };
+}
+
+// Writes stdin's records into ~/.claude/sessions and drops stand-ins no longer listed. Python, so the
+// same lines run here and over ssh on the remote.
+const WRITE_RECORDS_PY = `import json, os, re, sys
+d = os.path.expanduser("~/.claude/sessions"); keep = set()
+os.makedirs(d, exist_ok=True)
+for r in json.load(sys.stdin):
+    f = os.path.join(d, "%d.json" % r["pid"]); keep.add(os.path.basename(f))
+    with open(f + ".tmp", "w") as fh: json.dump(r, fh)
+    os.chmod(f + ".tmp", 0o600); os.replace(f + ".tmp", f)
+for n in os.listdir(d):
+    if re.fullmatch(r"9\\d{8}\\.json", n) and n not in keep:
+        try:
+            with open(os.path.join(d, n)) as fh:
+                if "relayMirror" in json.load(fh): os.remove(os.path.join(d, n))
+        except (OSError, ValueError): pass
+`;
 
 /** Where a chat's socket is mirrored on the other machine, or null for a path that is not one. */
 export function mirrorPath(sock, uid) {
@@ -51,19 +88,24 @@ export function relayPlan({ local, remote, localUid, remoteUid, remoteLabel, her
   const forwards = {};
   const onLocal = [];
   const onRemote = [];
+  const recordsLocal = [];
+  const recordsRemote = [];
+  const named = (s) => s.name && Number.isInteger(s.pid) && s.pid > 0 && s.cwd;
   for (const s of remote) {
     const mirror = mirrorPath(s.messagingSocketPath, remoteUid);
     if (!mirror) continue;
     forwards[`L ${mirror}`] = ['-L', `${mirror}:${s.messagingSocketPath}`];
     onLocal.push({ name: s.name ?? null, to: `uds:${mirror}`, addr: `uds:${s.messagingSocketPath}`, machine: remoteLabel });
+    if (named(s)) recordsLocal.push(standInRecord(s, mirror, remoteLabel));
   }
   for (const s of local) {
     const mirror = mirrorPath(s.messagingSocketPath, localUid);
     if (!mirror) continue;
     forwards[`R ${mirror}`] = ['-R', `${mirror}:${s.messagingSocketPath}`];
     onRemote.push({ name: s.name ?? null, to: `uds:${mirror}`, addr: `uds:${s.messagingSocketPath}`, machine: here });
+    if (named(s)) recordsRemote.push(standInRecord(s, mirror, here));
   }
-  return { forwards, onLocal, onRemote };
+  return { forwards, onLocal, onRemote, recordsLocal, recordsRemote };
 }
 
 /** ssh through the relay's own connection; resolves true on exit 0. Never waits on a backgrounded child. */
@@ -120,6 +162,15 @@ export async function syncRelay({ remote, mac: local, file = path.join(stateDir(
   if (onLocal !== state.onLocal) fs.writeFileSync(path.join(stateDir(), 'remote-peers.json'), onLocal);
   const remoteWritten = onRemote === state.onRemote
     || await ssh(host, [], { remote: ['mkdir -p ~/.claude-switchboard && cat > ~/.claude-switchboard/remote-peers.json.tmp && mv ~/.claude-switchboard/remote-peers.json.tmp ~/.claude-switchboard/remote-peers.json'], stdin: onRemote });
-  fs.writeFileSync(file, JSON.stringify({ forwards, onLocal, onRemote: remoteWritten ? onRemote : null }));
+
+  const recordsLocal = JSON.stringify(plan.recordsLocal);
+  const recordsRemote = JSON.stringify(plan.recordsRemote);
+  if (recordsLocal !== state.recordsLocal || plan.recordsLocal.some((r) => !fs.existsSync(path.join(SESSIONS_DIR, `${r.pid}.json`)))) {
+    spawnSync('python3', ['-c', WRITE_RECORDS_PY], { input: recordsLocal, timeout: 10_000 });
+  }
+  const remoteRecords = recordsRemote === state.recordsRemote
+    || await ssh(host, [], { remote: [`python3 -c '${WRITE_RECORDS_PY.replace(/'/g, `'\\''`)}'`], stdin: recordsRemote });
+  fs.writeFileSync(file, JSON.stringify({ forwards, onLocal, onRemote: remoteWritten ? onRemote : null,
+    recordsLocal, recordsRemote: remoteRecords ? recordsRemote : null }));
   return { added: fresh.length, removed: gone.length, mirrored: Object.keys(forwards).length };
 }
