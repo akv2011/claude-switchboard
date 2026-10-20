@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- With the relay on, the `@` list and ListAgents in a chat offer the other machine's chats as well as this machine's. They read only this machine's session records, so the relay writes a stand-in record for each chat on the other machine.
+
+- The recorder's liveness check asks ps only about pids that exist. macOS ps exits 1 on a pid above its range, and every chat then looked closed.
+
+- `offload claude` and `offload move` run from a terminal attach the way `offload attach` does, so a dropped link reconnects and mouse reporting is turned off afterwards. They ran a bare ssh before, and once the chat restarted the tab printed every mouse move into the shell.
+
 - `offload move <chat> -- --model <model>` passes Claude flags to the moved chat, as `offload claude` does. A chat could not be resumed on the remote with another model or effort.
 
 ## 1.1.0

@@ -96,6 +96,7 @@ export function readLiveSessions(options = {}) {
       name: entry.name ?? null,
       nameSource: entry.nameSource ?? null,
       status: entry.status ?? null,
+      statusUpdatedAt: entry.statusUpdatedAt ?? null,
       version: entry.version ?? null,
       kind: entry.kind ?? null,
       startedAt: entry.startedAt ?? null,

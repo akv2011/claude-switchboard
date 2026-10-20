@@ -254,8 +254,10 @@ launch() {
   local t=$1 dir=$2 shell
   shell="\$SHELL -lc $(q "claude $3")"
   # -u: a non-login ssh has no LANG, and tmux then draws every non-ASCII glyph as "_".
-  if is_tty; then exec ssh -tq "$HOST" "tmux -u new-session -A -s $(q "$t") -c $(q "$dir") $(q "$shell")"; fi
   ssh -T "$HOST" "tmux has-session -t $(q "=$t") 2>/dev/null || tmux -u new-session -d -s $(q "$t") -c $(q "$dir") $(q "$shell")"
+  # From a terminal, attach as offload attach does: a bare ssh had no reconnect and no mouse reset, so
+  # once the chat restarted the tab sat in the local shell printing every mouse move.
+  if is_tty; then cmd_attach "$t"; fi
   echo "offload: Claude Code chat $t is running on $HOST; attach from a terminal with: offload attach $t" >&2
 }
 

@@ -100,7 +100,9 @@ export function processStartTimes(pids) {
  */
 export function verifyLiveness(entries) {
   const result = new Map();
-  const pids = entries.map((e) => e.pid).filter((p) => Number.isInteger(p) && p > 0);
+  // Only pids that exist: macOS ps exits 1 on a pid above its range, such as the relay's stand-in
+  // records for the other machine's chats, and every chat here then looked closed.
+  const pids = entries.map((e) => e.pid).filter((p) => Number.isInteger(p) && p > 0 && pidExists(p));
   const starts = processStartTimes(pids);
 
   for (const entry of entries) {

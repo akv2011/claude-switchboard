@@ -38,3 +38,21 @@ test('the relay stays off unless config.relay is set', async () => {
   assert.equal(await syncRelay({ remote, mac: [], config: { relay: false, remote: { host: 'devbox', label: 'Devbox' } } }), null);
   assert.equal(await syncRelay({ remote, mac: [], config: { relay: true, remote: null } }), null);
 });
+
+test('each machine gets a stand-in record per named chat on the other, at its mirror, that no pid check finds alive', () => {
+  const plan = relayPlan({
+    local: [{ pid: 4242, name: 'build-bot', cwd: '/p', status: 'idle', statusUpdatedAt: 5, messagingSocketPath: '/tmp/cc-socks/4242.sock' },
+      { pid: 7, name: null, cwd: '/p', messagingSocketPath: '/tmp/cc-socks/7.sock' }],
+    remote: [{ pid: 3096916, name: 'Web UI', cwd: '/p', startedAt: 9, messagingSocketPath: '/run/user/1000/cc-socks/3096916.sock' }],
+    localUid: 501, remoteUid: 1000, remoteLabel: 'Devbox', here: 'the Mac',
+  });
+  assert.deepEqual(plan.recordsRemote, [{ pid: 900004242, name: 'build-bot', cwd: '/p', kind: 'interactive',
+    messagingSocketPath: '/tmp/cc-socks-1000501/4242.sock', pidDomain: 'relay:the Mac', relayMirror: 'the Mac', startedAt: 0,
+    status: 'idle', statusUpdatedAt: 5 }], 'an unnamed chat gets no record');
+  assert.deepEqual(plan.recordsLocal, [{ pid: 903096916, name: 'Web UI', cwd: '/p', kind: 'interactive',
+    messagingSocketPath: '/tmp/cc-socks-1001000/3096916.sock', pidDomain: 'relay:Devbox', relayMirror: 'Devbox', startedAt: 9 }]);
+  for (const r of [...plan.recordsLocal, ...plan.recordsRemote]) {
+    assert.equal(r.sessionId, undefined, 'never read as this machine holding the chat');
+    assert.ok(r.pid > 4194304 && r.pid < 2 ** 31, 'above Linux pid_max, a valid int');
+  }
+});
