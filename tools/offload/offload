@@ -422,7 +422,11 @@ cmd_move() {
     scp -pq "$tp" "$HOST:$pdir/"
     [ -d "$pdir/$id" ] && scp -prq "$pdir/$id" "$HOST:$pdir/"
   fi
-  launch "$t" "$cwd" "--resume $(q "$id")$extra"
+  # --name: a bare resume sometimes registers a name made from the folder, and the chat then answers to
+  # that on the remote. An untitled chat (resolve_session gives its id's first 8 characters) keeps Claude's own.
+  local named=""
+  [ "$name" != "${id:0:8}" ] && named=" --name $(q "$name")"
+  launch "$t" "$cwd" "--resume $(q "$id")$named$extra"
 }
 
 cmd_status() {

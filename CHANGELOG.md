@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `offload move` resumes a chat under its own title. A bare resume sometimes registered a name made from the folder, so the moved chat answered to that.
+
 - With the relay on, the `@` list and ListAgents in a chat offer the other machine's chats as well as this machine's. They read only this machine's session records, so the relay writes a stand-in record for each chat on the other machine.
 
 - The recorder's liveness check asks ps only about pids that exist. macOS ps exits 1 on a pid above its range, and every chat then looked closed.
