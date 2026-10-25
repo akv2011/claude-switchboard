@@ -38,12 +38,15 @@ const STAND_IN_PID = 900_000_000;
 /**
  * Pure. Claude Code's record for a chat on the other machine, at its mirror. A pidDomain that is not
  * this machine's makes Claude Code skip the pid check, list the chat while the mirror answers, and
- * never delete the file. No sessionId, so a resume or compaction never reads the chat as held here;
- * no procStart, so a send never expects the relay's ssh to be that process.
+ * never delete the file, but only for a record that passes its schema, which requires a sessionId.
+ * With none, every new tab's startup sweep deletes all the stand-ins, and its @ list offers this
+ * machine's chats alone until the next relay tick. The sessionId is a placeholder that matches no
+ * transcript, so a resume never reads the chat as held here; no procStart, so a send never expects
+ * the relay's ssh to be that process.
  */
 export function standInRecord(s, sock, machine) {
   return {
-    pid: STAND_IN_PID + s.pid, name: s.name, cwd: s.cwd, kind: 'interactive', messagingSocketPath: sock,
+    pid: STAND_IN_PID + s.pid, sessionId: `relay-${machine}-${s.pid}`, name: s.name, cwd: s.cwd, kind: 'interactive', messagingSocketPath: sock,
     pidDomain: `relay:${machine}`, relayMirror: machine, startedAt: s.startedAt ?? 0,
     ...(s.status && { status: s.status }), ...(s.statusUpdatedAt && { statusUpdatedAt: s.statusUpdatedAt }),
   };
