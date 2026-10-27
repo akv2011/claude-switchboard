@@ -97,11 +97,11 @@ fi
 # it holds the session by its id, which a rename keeps.
 command -v jq >/dev/null && tmux list-panes -a -F '#{pane_pid} #{session_name} #{pane_start_command}' 2>/dev/null | while read -r pane sess cmd; do
   case $cmd in *"claude --name"*|*"claude --resume"*) ;; *) continue ;; esac
-  for f in "$HOME"/.claude/sessions/*.json; do
+  # zsh -lc execs claude, so the chat is usually the pane's own process, else a child of it. Looked
+  # up by pid: a ps per registry file in every pane took 9 s on a remote short of memory (2026-10-28).
+  for p in "$pane" $(pgrep -P "$pane"); do
+    f="$HOME/.claude/sessions/$p.json"
     [ -f "$f" ] || continue
-    p=$(basename "$f" .json)
-    # zsh -lc execs claude, so the chat is usually the pane's own process.
-    [ "$p" = "$pane" ] || [ "$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')" = "$pane" ] || continue
     want=$(jq -j '.name // empty' "$f" 2>/dev/null | tr -c 'A-Za-z0-9_-' '_' | cut -c1-50)
     [ -n "$want" ] && [ "$want" != "$sess" ] && ! tmux has-session -t "=$want" 2>/dev/null &&
       tmux rename-session -t "=$sess" "$want"

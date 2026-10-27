@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The remote card no longer reads "No reading" on a remote short of memory. Its status check started a `ps` for every session record in every chat pane, about 900 of them with 19 chats, and took 9 s against an 8 s limit. It now looks each pane's chat up by pid.
+
 - A banner when a chat needs you: `tools/notify/install.sh` adds a Claude Code hook for turn ends, questions, permission prompts, plans to approve and API errors. Background turns ping only when they address you or report a problem or a finished job, at most hourly per kind. On the remote, `--forward-to` sends its banners to your main machine over a key that can only post one.
 
 - `offload move` resumes a chat under its own title. A bare resume sometimes registered a name made from the folder, so the moved chat answered to that.
