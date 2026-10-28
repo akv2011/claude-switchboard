@@ -93,6 +93,8 @@ let state: State | null = null;
 let view: View = { kind: 'all' };
 // On top of the view, not instead of it: a folder or group shown only for the remote keeps its place.
 let machineFilter: 'mac' | 'remote' | null = null;
+// The same by model: only the chats whose last reply came from it ("sonnet 5.5").
+let modelFilter: string | null = null;
 const whereNow = (s: Session) => (s.live ? s.machine : s.lastMachine) ?? 'mac';
 let lastFingerprint = '';
 const rowEls = new Map<string, HTMLElement>();
@@ -201,6 +203,7 @@ function stateWord(s: Session) {
 
 function inView(s: Session) {
   if (machineFilter && whereNow(s) !== machineFilter) return false;
+  if (modelFilter && s.modelShort !== modelFilter) return false;
   switch (view.kind) {
     case 'all': return true;
     case 'needs': return s.needsYou;
@@ -1632,7 +1635,8 @@ let showOldAgents = false;
 function agentsBlock(): HTMLElement | null {
   const all = state!.background ?? [];
   // Background agents run under the Mac's daemon, so the remote filter leaves them out.
-  const inScope = (view.kind === 'all' || view.kind === 'needs') && machineFilter !== 'remote';
+  // Nor does a model filter: an agent's model is not known here.
+  const inScope = (view.kind === 'all' || view.kind === 'needs') && machineFilter !== 'remote' && !modelFilter;
   const q = needle();
   const list = all.filter((a) => !q || [a.name, a.needs, a.detail].some((v) => (v ?? '').toLowerCase().includes(q)));
   if (!inScope || !list.length) { rowEls.get('#agents')?.remove(); rowEls.delete('#agents'); return null; }
@@ -1818,7 +1822,8 @@ function groupHeader(kind: string, label: string, count: number) {
 }
 
 function renderList() {
-  $('title').textContent = `${viewTitle()}${machineFilter ? `, on ${machineFilter === 'remote' ? R() : 'the Mac'}` : ''}`;
+  renderModels();
+  $('title').textContent = `${viewTitle()}${machineFilter ? `, on ${machineFilter === 'remote' ? R() : 'the Mac'}` : ''}${modelFilter ? `, ${modelFilter}` : ''}`;
   const matching = sortSessions(allSessions().filter(inView).filter(matchesSearch));
   const bytes = matching.reduce((sum, s) => sum + s.bytes + s.subagentBytes, 0);
   const running = matching.filter((s) => s.live).length;
@@ -1849,6 +1854,8 @@ function renderList() {
     rowEls.clear();
     host.innerHTML = view.kind === 'needs'
       ? '<div class="empty"><strong>Nothing needs you</strong>Every running chat is working on its own.</div>'
+      : modelFilter
+        ? `<div class="empty"><strong>Nothing on ${escapeHtml(modelFilter)} here</strong>Choose Any model above the list to see every chat.</div>`
       : machineFilter
         ? `<div class="empty"><strong>Nothing on ${machineFilter === 'remote' ? escapeHtml(R()) : 'the Mac'} here</strong>Choose All above the list to see every chat.</div>`
         : '<div class="empty"><strong>Nothing here</strong>No chats match this view.</div>';
@@ -2222,6 +2229,29 @@ function setMachineFilter(next: 'mac' | 'remote' | null) {
   renderMachines();
   renderList();
 }
+/**
+ * A button per model the running chats use, most used first, with how many run on it. Shown once
+ * two are in use; the chosen one keeps its button after its last chat stops.
+ */
+function renderModels() {
+  const tally = new Map<string, number>();
+  for (const s of allSessions()) if (s.live && s.modelShort) tally.set(s.modelShort, (tally.get(s.modelShort) ?? 0) + 1);
+  if (modelFilter && !tally.has(modelFilter)) tally.set(modelFilter, 0);
+  const models = [...tally].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const host = $('models');
+  const sig = JSON.stringify([models, modelFilter]);
+  if (host.dataset.sig === sig) return;
+  host.dataset.sig = sig;
+  host.hidden = models.length < 2 && !modelFilter;
+  host.innerHTML = `<button class="sort-btn" type="button" data-model="" aria-pressed="${!modelFilter}">Any model</button>${models.map(([m, c]) =>
+    `<button class="sort-btn" type="button" data-model="${escapeHtml(m)}" aria-pressed="${modelFilter === m}" aria-label="${escapeHtml(m)}, ${c} running">${escapeHtml(m)}<span class="sort-n" aria-hidden="true">${c}</span></button>`).join('')}`;
+}
+$('models').onclick = (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-model]');
+  if (!b || (b.dataset.model || null) === modelFilter) return;
+  modelFilter = b.dataset.model || null;
+  renderList();
+};
 $('on-all').onclick = () => setMachineFilter(null);
 $('on-mac').onclick = () => setMachineFilter('mac');
 $('on-remote').onclick = () => setMachineFilter('remote');

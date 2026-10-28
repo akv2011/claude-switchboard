@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { stateDir } from './paths.js';
 
-const VERSION = 12;   // 2 model+effort; 3 dropped <synthetic>; 4 entrypoint; 5 parent link; 6 last line; 7 context+permission; 8 path tokens; 9 stopped on; 10 path tokens count every folder; 12 every folder in the head, for the start folder
+const VERSION = 13;   // 2 model+effort; 3 dropped <synthetic>; 4 entrypoint; 5 parent link; 6 last line; 7 context+permission; 8 path tokens; 9 stopped on; 10 path tokens count every folder; 12 every folder in the head, for the start folder; 13 model behind a resume's attachments
 const cacheFile = () => path.join(stateDir(), 'scan-cache.json');
 
 export function readScanCache() {

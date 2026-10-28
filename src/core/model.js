@@ -10,6 +10,7 @@
  * chat is actually using. That means reading the tail, not the head.
  */
 
+import fs from 'node:fs';
 import { readTailEntries } from './jsonl.js';
 
 /**
@@ -17,6 +18,9 @@ import { readTailEntries } from './jsonl.js';
  * hundred kilobytes of tool results after its last sentence.
  */
 const TAIL_BYTES = 256 * 1024;
+/** How far back to look when that holds no reply. */
+const RESUMED_TAIL_BYTES = 4 * 1024 * 1024;
+const sizeOf = (file) => { try { return fs.statSync(file).size; } catch { return 0; } };
 
 /**
  * Claude Code writes its own messages into the transcript as an assistant entry
@@ -56,8 +60,8 @@ const LAST_LINE_CHARS = 160;
  *
  * @returns {{model:string|null, effort:string|null, lastLine:string|null}}
  */
-export function readTailFacts(file) {
-  const entries = readTailEntries(file, TAIL_BYTES);
+export function readTailFacts(file, bytes = TAIL_BYTES) {
+  const entries = readTailEntries(file, bytes);
   let model = null;
   let effort = null;
   let lastLine = null;
@@ -97,6 +101,9 @@ export function readTailFacts(file) {
     if (!lastLine) lastLine = lastTextLine(entry);
     if (model && lastLine && contextTokens !== null && permissionMode) break;
   }
+  // A resume writes its attachments (skills, tools, memory) after the last reply: 280 to 490 KB
+  // of them in 8 running chats on 2026-10-29, which then read as on no model, with no last line.
+  if (!model && bytes < RESUMED_TAIL_BYTES && sizeOf(file) > bytes) return readTailFacts(file, RESUMED_TAIL_BYTES);
   return { model, effort, lastLine, contextTokens, permissionMode, stoppedOn, pathTokens: pathTokens(entries) };
 }
 

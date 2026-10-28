@@ -257,6 +257,8 @@ h1, h2 { font-weight: 500; }
 .sort-btn + .sort-btn { border-left: 1px solid var(--border); }
 .sort-btn:hover { color: var(--text); background: var(--hover); }
 .sort-btn[aria-pressed="true"] { background: var(--raised); color: var(--text); }
+.sort[hidden] { display: none; }
+.sort-n { margin-left: 6px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 /* ---------- offer (bring back) ---------- */
 
