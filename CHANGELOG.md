@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A tab reattached after the remote restarts runs its command. tmux 3.6 and later turn on theme reports in the terminal; a dropped link left them on, the terminal typed "997;1n" at the prompt, and the command typed after it failed. `offload attach` turns them off with the other modes, and a command typed into an old tab clears the line first.
+
 - Model buttons beside All / Mac / Remote: one per model the running chats use, with how many run on it, so the list can show only the chats on one model. They show once two models are in use.
 
 - A resumed chat shows its model and last line. Both were read from the last 256 KB of the transcript, and a resume writes its attachments (skills, tools, memory) after the last reply, 280 to 490 KB of them; that read now goes back up to 4 MB when the first holds no reply.

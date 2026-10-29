@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { runInVscodeTerminal, shq } from '../src/core/vscode-bridge.js';
@@ -64,6 +65,41 @@ test('an unclaimed request opens the chat\'s window, not a window on its subfold
     { root, open: async (d) => seen.push(d), openAfterMs: 100, giveUpMs: 600 },
   );
   assert.deepEqual(seen, [window]);
+});
+
+/** What a terminal's shell runs: a real zsh in a pseudo-terminal gets `typed` as keyboard input, then `text` as VS Code's sendText sends it. */
+function shellRuns(typed, text) {
+  const py = `import os, pty, select, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("zsh", ["zsh", "-f", "-i"], {**os.environ, "PS1": "$ ", "EDITOR": "", "VISUAL": ""})
+out = b""
+def drain(t):
+    global out
+    end = time.time() + t
+    while time.time() < end:
+        if select.select([fd], [], [], 0.05)[0]:
+            try: out += os.read(fd, 4096)
+            except OSError: return
+drain(0.5); os.write(fd, sys.argv[1].encode()); drain(0.3)
+os.write(fd, sys.argv[2].encode() + b"\\r"); drain(1.0); os.write(fd, b"exit\\r"); drain(0.5)
+sys.stdout.write(out.decode("utf-8", "replace"))`;
+  return spawnSync('python3', ['-c', py, typed, text], { encoding: 'utf8' }).stdout;
+}
+
+test('a command typed into an old tab runs even when its prompt holds leftover input', async () => {
+  // Seen live 2026-10-29: after the Dell powered off, VS Code's theme reports sat at 12 tabs' prompts
+  // as "997;1n", and the reattach ran as "997;1n~/.local/bin/dell attach ...": command not found.
+  const root = tmpRoot();
+  let sent = null;
+  fakeWindow(root, (req) => { sent = req.text; return { reused: true, folder: '/w', at: Date.now() }; });
+  await runInVscodeTerminal(
+    { shellPid: 42, cwd: '/w/p', name: 'x', text: 'echo ran-$((6*7))' },
+    { root, open: async () => {}, openAfterMs: 5000, giveUpMs: 3000 },
+  );
+  const out = shellRuns('997;1n', sent);
+  assert.match(out, /ran-42/, `the command did not run:\n${out}`);
+  assert.doesNotMatch(out, /command not found/);
 });
 
 test('shq quotes names for the shell', () => {

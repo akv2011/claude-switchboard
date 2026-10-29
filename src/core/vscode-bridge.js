@@ -88,7 +88,10 @@ export async function runInVscodeTerminal(
   fs.mkdirSync(done, { recursive: true });
   const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.json`;
   const tmp = path.join(requests, `${id}.tmp`);
-  fs.writeFileSync(tmp, JSON.stringify({ shellPid, cwd, name, text, focus, at: Date.now() }));
+  // An old tab's prompt can hold leftover input: after the Dell powered off, VS Code's theme reports sat
+  // there as "997;1n" and the attach typed after them ran as "997;1n~/.local/bin/dell", in 12 tabs
+  // (2026-10-29). Ctrl+U clears the line first.
+  fs.writeFileSync(tmp, JSON.stringify({ shellPid, cwd, name, text: shellPid ? `\u0015${text}` : text, focus, at: Date.now() }));
   fs.renameSync(tmp, path.join(requests, id));
 
   const started = Date.now();
